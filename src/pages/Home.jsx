@@ -71,12 +71,12 @@ export default function Home() {
             {/* LEFT — text + buttons */}
             <div className="flex flex-col justify-center pt-24 pb-16 lg:py-32 animate-fade-up order-1">
               <p className="section-label text-[#b8607a] mb-4">PHOTOGRAPHY · BEAUTY · STYLE</p>
-              <h1 className="font-display font-black text-[26px] md:text-[48px] lg:text-[60px] leading-[1.05] text-[#3d1f6e] mb-5">
+              <h1 className="font-display font-black text-[31px] md:text-[48px] lg:text-[62px] leading-[1.05] text-[#3d1f6e] mb-5" style={{ fontFamily: '"Cormorant Garamond", serif' }}>
                 Your Face,<br />
                 <span className="text-gradient-rose">Your First Brand,</span><br />
                 Your Confidence.
               </h1>
-              <p className="text-[#5a3a42] text-base max-w-lg leading-relaxed mb-3">
+              <p className="text-[#5a3a42] text-sm md:text-base max-w-lg leading-relaxed mb-3">
                 Glam that moves with you — shoots, events, and every room you walk into. One session with us reveals the beautiful, confident and unstoppable version of yourself.
               </p>
               <p className="text-[#5a3a42] text-sm max-w-lg leading-relaxed mb-6">
