@@ -825,14 +825,33 @@ export default {
       if (action === 'testEmail') {
         await checkPin(fs, env, body.pin as string);
         const to = (body.to as string) || 'beccastouchstudio@gmail.com';
-        const testHtml = shell('', '', `
-          <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">Email is working! 🎉</h2>
-          <p style="margin:0 0 16px;font-size:13px;color:#9a7080;">Hi there, this is a test email from <b>${STUDIO}</b>.</p>
-          <div style="background:#f0faf3;border:1px solid #b8e0c8;border-radius:12px;padding:14px 18px;">
-            <p style="margin:0;font-size:13px;color:#3d7a53;font-weight:600;">✅ Email delivery via Base44 Gmail is working correctly.</p>
-          </div>`);
-        await sendMail(env, to, `[${STUDIO}] Test Email ✓`, testHtml, fs);
-        return j({ ok: true, message: 'Test email sent', email: to });
+        const override = (body.templateOverride as string) || '';
+        const b = (body.booking as Record<string,unknown>) || {};
+        const note = (body.note as string) || '';
+        let html: string;
+        let subject: string;
+        if (override === 'submitted') {
+          html = tplSubmitted(b);
+          const typeLabel = bookingTypeLabel(b);
+          subject = `[TEST] ${typeLabel} booking received — ${b.booking_id || 'TEST'} | ${STUDIO}`;
+        } else if (override === 'admin') {
+          html = tplAdmin(b);
+          const typeLabel = bookingTypeLabel(b);
+          subject = `[TEST] New booking — ${b.booking_id || 'TEST'} | ${typeLabel} | ${STUDIO}`;
+        } else if (override === 'statusUpdate') {
+          html = tplStatusUpdate(b, note);
+          subject = `[TEST] Booking update — ${b.booking_id || 'TEST'} | ${STUDIO}`;
+        } else {
+          html = shell('', '', `
+            <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">Email is working! 🎉</h2>
+            <p style="margin:0 0 16px;font-size:13px;color:#9a7080;">Hi there, this is a test email from <b>${STUDIO}</b>.</p>
+            <div style="background:#f0faf3;border:1px solid #b8e0c8;border-radius:12px;padding:14px 18px;">
+              <p style="margin:0;font-size:13px;color:#3d7a53;font-weight:600;">✅ Email delivery via Base44 Gmail is working correctly.</p>
+            </div>`);
+          subject = `[${STUDIO}] Test Email ✓`;
+        }
+        await sendMail(env, to, subject, html, fs);
+        return j({ ok: true, message: 'Test email sent', email: to, template: override || 'generic' });
       }
 
       // ── envCheck ────────────────────────────────────────────────────────────
