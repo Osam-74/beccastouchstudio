@@ -71,7 +71,7 @@ export default function Home() {
             {/* LEFT — text + buttons */}
             <div className="flex flex-col justify-center pt-24 pb-16 lg:py-32 animate-fade-up order-1">
               <p className="section-label text-[#b8607a] mb-4">PHOTOGRAPHY · BEAUTY · STYLE</p>
-              <h1 className="font-display font-black text-[31px] md:text-[48px] lg:text-[62px] leading-[1.05] text-[#3d1f6e] mb-5" style={{ fontFamily: '"Cormorant Garamond", serif' }}>
+              <h1 className="font-display font-black text-[34px] md:text-[48px] lg:text-[68px] leading-[1.05] text-[#3d1f6e] mb-5" style={{ fontFamily: '"Cormorant Garamond", serif' }}>
                 Your Face,<br />
                 <span className="text-gradient-rose">Your First Brand,</span><br />
                 Your Confidence.
