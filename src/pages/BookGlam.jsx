@@ -175,7 +175,7 @@ function GlamResumeBanner() {
   function goResume() {
     const id = val.trim().toUpperCase();
     if (!id) return;
-    navigate('/track?id=' + encodeURIComponent(id));
+    navigate('/book-glam?resume=' + encodeURIComponent(id));
   }
   return (
     <div className="rose-card px-5 py-4 mb-5">

@@ -157,7 +157,7 @@ export default function TrackBooking() {
 
             {/* action buttons */}
             <div className="grid grid-cols-2 gap-3">
-              <button type="button" onClick={resume} disabled={booking.flowStatus!=='draft'}
+              <button type="button" onClick={resume} disabled={['confirmed','rejected','archived'].includes(booking.bookingStatus)}
                 className="btn-outline-dark justify-center disabled:opacity-40">
                 <RotateCcw size={13}/> Resume draft
               </button>
