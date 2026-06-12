@@ -51,7 +51,7 @@ export default function Home() {
             alt="Beccastouch Studio"
             style={{
               width: '100%',
-              height: '80%',
+              height: '100%',
               objectFit: 'cover',
               objectPosition: 'center top',
               display: 'block',
@@ -60,7 +60,7 @@ export default function Home() {
           {/* left-edge soft fade */}
           <div style={{
             position: 'absolute', inset: 0,
-            background: 'linear-gradient(to right, rgba(253,242,245,0.7) 0%, transparent 35%)',
+            //background: 'linear-gradient(to right, rgba(253,242,245,0.7) 0%, transparent 35%)',
             pointerEvents: 'none',
           }} />
         </div>
