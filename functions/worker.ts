@@ -238,7 +238,7 @@ async function sendMail(
   _fs?: Firestore,
 ): Promise<void> {
   console.log('[sendMail] Sending to:', to, '| subject:', subject.slice(0, 60));
-  const GMAIL_RELAY_URL = 'https://api.base44.com/api/apps/6a2b0fd46df8ce19f5241af5/functions/sendGmailEmail';
+  const GMAIL_RELAY_URL = 'https://base44.app/api/apps/6a20231d1299be7fe13fbca1/functions/sendGmailEmail';
   const MAIL_SECRET = (env as any).BECCA_MAIL_SECRET || "~mQmAT.s6BUB'L.";
   try {
     const res = await fetch(GMAIL_RELAY_URL, {
