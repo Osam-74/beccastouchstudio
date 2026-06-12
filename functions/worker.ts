@@ -653,8 +653,8 @@ export default {
       if (action === 'adminOverview') {
         await checkPin(fs, env, body.pin as string);
         const all = await fs.query('bookings', [], '-created_date');
-        const active = all.filter(b => b.status !== 'archived');
-        return j({ ok: true, bookings: active.map(toFE), total: active.length });
+        // Return ALL bookings — frontend filters by tab (archived/active)
+        return j({ ok: true, bookings: all.map(toFE), total: all.length });
       }
 
       // ── resetPin ────────────────────────────────────────────────────────────
