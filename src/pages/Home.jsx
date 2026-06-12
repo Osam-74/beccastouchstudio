@@ -35,7 +35,7 @@ export default function Home() {
           Mobile:  single column. Heading → full-width image strip → buttons.
       */}
       {/* HERO: left text in container, right image is full-bleed to viewport edge */}
-      <section className="relative bg-blush overflow-hidden h-[75vh]">
+      <section className="relative bg-blush overflow-hidden min-h-screen">
 
         {/* Desktop: absolutely positioned image on the right half, below navbar */}
         <div className="hidden lg:block" style={{
@@ -51,7 +51,7 @@ export default function Home() {
             alt="Beccastouch Studio"
             style={{
               width: '100%',
-              height: '100%',
+              height: '80%',
               objectFit: 'cover',
               objectPosition: 'center top',
               display: 'block',
