@@ -1,0 +1,1479 @@
+From 5e0de20b7895cf68cf02499d447259fd50f2fefd Mon Sep 17 00:00:00 2001
+From: Superagent <agent@base44.com>
+Date: Thu, 11 Jun 2026 11:42:59 +0000
+Subject: [PATCH] feat: cart system, shop orders, personalised emails, booking
+ ID fix, training section, footer updates
+
+- Fix booking ID prefix (STU-/GLM- instead of undefined BK-)
+- Fix searchBookings to accept email/phone/query from frontend (was causing 'Invalid PIN' error on track page)
+- Fix client emails: now sent for ALL booking types (studio, glam, bridal, special)
+- Personalised email templates per booking type with rich context
+- Add 2-hour reminder email template + sendReminder backend action
+- Full cart system on Shop page (no login, localStorage session)
+  - Add to cart, quantity controls, remove items
+  - Cart drawer, checkout form (name/phone/delivery type)
+  - Sends order via WhatsApp + saves to backend
+- New shop_orders Firestore collection + adminGetShopOrders/Update/Delete actions
+- Admin: new Orders tab with filter/sort/delete for shop orders
+- Training services section on homepage
+- Footer: TikTok icon @beccastouch, phone 08023274274, exact address, Ola hyperlinked
+- siteConfig: updated phone, whatsapp, TikTok, address
+- saveShopOrder backend action + admin email notification
+---
+ functions/bookingApi.ts           | 287 +++++++++++++++--
+ src/components/AdminOrdersTab.jsx | 194 ++++++++++++
+ src/components/Footer.jsx         | 105 ++++---
+ src/pages/Admin.jsx               |   5 +-
+ src/pages/Home.jsx                |  45 +++
+ src/pages/Shop.jsx                | 493 ++++++++++++++++++++++--------
+ src/utils/bookingApi.js           |   5 +
+ src/utils/siteConfig.js           |  10 +-
+ 8 files changed, 935 insertions(+), 209 deletions(-)
+ create mode 100644 src/components/AdminOrdersTab.jsx
+
+diff --git a/functions/bookingApi.ts b/functions/bookingApi.ts
+index 6044101..11c0ee2 100644
+--- a/functions/bookingApi.ts
++++ b/functions/bookingApi.ts
+@@ -30,9 +30,12 @@ const j = (data: unknown, s = 200) =>
+ 
+ // ── Constants ─────────────────────────────────────────────────────────────────
+ const STUDIO = 'Beccastouch Studio';
+-const ADDRESS = 'Ibadan, Nigeria';
++const ADDRESS = 'Total Filling Station, Oju-Irin Bodija, Ibadan, Oyo State';
+ const DEFAULT_PIN = '12345678';
+ const PAYMENT = { bankName: 'First Bank', accountName: 'Beccastouch Studio', accountNumber: '0123456789', currency: 'NGN' };
++const PHONE = '+234 802 327 4274';
++const TIKTOK = '@beccastouch';
++const INSTAGRAM = 'https://www.instagram.com/beccastouch';
+ const RULES = [
+   'Your booking is provisional until payment is verified and the studio confirms your slot.',
+   'Keep your booking ID safe — use it to track status or resume your booking.',
+@@ -244,18 +247,26 @@ async function checkPin(fs: Firestore, pin: string): Promise<void> {
+ }
+ 
+ // ── ID generator ──────────────────────────────────────────────────────────────
+-function bid(p = 'BK') {
++function bid(bookingType?: string): string {
++  const prefix = bookingType === 'glam' ? 'GLM' : bookingType === 'studio' ? 'STU' : 'BK';
+   const d = new Date();
+-  return `${p}-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}-${Math.random().toString(36).slice(2,5).toUpperCase()}`;
++  const rand = Math.random().toString(36).slice(2,6).toUpperCase();
++  return `${prefix}-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}-${rand}`;
+ }
+ 
+ // ── Booking helpers ───────────────────────────────────────────────────────────
+-const smry = (p: Record<string, unknown>) =>
+-  p.booking_type === 'studio'
+-    ? `${p.studio_use === 'content' ? 'Content Creation' : 'Photoshoot'} · ${p.session_type === 'group' ? 'Group' : 'Single'} · ${p.preferred_date || 'TBD'}`
+-    : p.occasion === 'bridal'   ? `Bridal Glam · ${p.bridal_wedding_date || p.preferred_date || 'TBD'}`
+-    : p.occasion === 'special'  ? `Special Request · ${p.preferred_date || 'TBD'}`
+-    : `${p.service_type === 'makeup+gele' ? 'Makeup + Gele' : p.service_type === 'gele' ? 'Gele Only' : 'Makeup Only'} · General Glam · ${p.preferred_date || 'TBD'}`;
++const smry = (p: Record<string, unknown>) => {
++  if (p.booking_type === 'studio') {
++    const use = String(p.studio_use || 'photoshoot');
++    const sess = String(p.session_type || 'single');
++    const dur = p.duration_hours ? `${p.duration_hours}h` : '';
++    return `${use === 'content' ? 'Content Creation' : 'Photoshoot'} · ${sess === 'group' ? 'Group' : 'Single'}${dur ? ' · ' + dur : ''} · ${p.preferred_date || 'TBD'}`;
++  }
++  if (p.occasion === 'bridal')  return `Bridal Glam · ${p.bridal_wedding_date || p.preferred_date || 'TBD'}`;
++  if (p.occasion === 'special') return `Special Request · ${p.preferred_date || 'TBD'}`;
++  const svc = p.service_type === 'makeup+gele' ? 'Makeup + Gele' : p.service_type === 'gele' ? 'Gele Only' : 'Makeup Only';
++  return `${svc} · General Glam · ${p.preferred_date || 'TBD'}`;
++};
+ 
+ const norm = (p: Record<string, unknown>, id: string, flow: string, ex?: Record<string, unknown> | null) => ({
+   booking_id: id, booking_type: p.booking_type || '', flow_status: flow,
+@@ -441,25 +452,176 @@ const dr  = (l: string, v: string) => v ? `<tr><td style="padding:4px 0;font-siz
+ const payHtml   = () => `<div style="background:#f8f4ff;border-radius:12px;border:1px solid #ddd0f5;padding:16px 18px;margin-top:18px;"><p style="margin:0 0 10px;font-size:11px;font-weight:700;color:#3d1f6e;text-transform:uppercase;letter-spacing:0.1em;">Payment details</p><table cellpadding="0" cellspacing="0">${dr('Bank', PAYMENT.bankName)}${dr('Account name', PAYMENT.accountName)}${dr('Account no.', PAYMENT.accountNumber)}</table></div>`;
+ const rulesHtml = () => `<div style="background:#fdf8ff;border-radius:12px;border:1px solid #ede8f5;padding:16px 18px;margin-top:18px;"><p style="margin:0 0 10px;font-size:11px;font-weight:700;color:#3d1f6e;text-transform:uppercase;letter-spacing:0.1em;">Important notes</p>${RULES.map((r, i) => `<p style="margin:0 0 6px;font-size:12px;color:#7a5090;line-height:1.5;"><b style="color:#c8788a;">${i+1}.</b> ${r}</p>`).join('')}</div>`;
+ 
+-const tplReceived  = (b: Record<string, unknown>) => shell(`<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">Booking received ✓</h2><p style="margin:0 0 20px;font-size:13px;color:#7a5090;">Hi <b>${b.client_name}</b>, we've got your booking!</p>${ib(b.booking_id as string)}<table cellpadding="0" cellspacing="0">${dr('Summary', b.client_summary as string || '—')}${b.preferred_date ? dr('Date', b.preferred_date as string) : ''}${b.total_amount ? dr('Amount', `${b.currency} ${Number(b.total_amount).toLocaleString()}`) : ''}${dr('Status', '⏳ Pending verification')}</table>${payHtml()}${rulesHtml()}`);
+-const tplBridal    = (b: Record<string, unknown>) => shell(`<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">${b.occasion === 'bridal' ? 'Bridal request received 💍' : 'Special request received ✨'}</h2><p style="margin:0 0 20px;font-size:13px;color:#7a5090;">Hi <b>${b.client_name}</b>!</p>${ib(b.booking_id as string)}<div style="background:#f0faf5;border-radius:12px;border:1px solid rgba(40,160,100,0.2);padding:16px 18px;"><p style="margin:0;font-size:13px;color:#2a6a45;line-height:1.6;">Our team will reach out to you shortly to discuss your needs and pricing.</p></div>`);
+-const tplConfirmed = (b: Record<string, unknown>) => shell(`<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">You're confirmed! 🎉</h2><p style="margin:0 0 20px;font-size:13px;color:#7a5090;">Hi <b>${b.client_name}</b>, your booking is confirmed!</p>${ib(b.booking_id as string)}<div style="background:#f0faf5;border-radius:12px;padding:16px 18px;margin-bottom:16px;"><table cellpadding="0" cellspacing="0">${dr('Name', b.client_name as string)}${b.preferred_date ? dr('Date', b.preferred_date as string) : ''}${b.total_amount ? dr('Amount', `${b.currency} ${Number(b.total_amount).toLocaleString()}`) : ''}${dr('Status', '✅ Confirmed')}</table></div>${b.admin_note ? `<div style="background:#fffbf0;border-radius:12px;border:1px solid #f0e4b8;padding:14px 18px;margin-bottom:14px;"><p style="margin:0;font-size:13px;color:#6a5020;">${b.admin_note}</p></div>` : ''}<p style="font-size:12px;color:#7a5090;">📍 <b>${ADDRESS}</b> — please arrive 15 minutes early.</p>`);
+-const tplRejected  = (b: Record<string, unknown>) => shell(`<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">Update on your booking</h2><p style="margin:0 0 20px;font-size:13px;color:#7a5090;">Hi <b>${b.client_name}</b>, unfortunately we can't confirm this booking at this time.</p>${ib(b.booking_id as string)}${b.admin_note ? `<div style="background:#fff4f4;border-radius:12px;border:1px solid #f0c8c8;padding:14px 18px;margin-bottom:16px;"><p style="margin:0;font-size:13px;color:#6a2020;">${b.admin_note}</p></div>` : ''}<p style="font-size:13px;color:#7a5090;">We'd love to find a time that works — feel free to rebook.</p>`);
+-const tplAdmin     = (b: Record<string, unknown>) => shell(`<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">New booking — action needed</h2>${ib(b.booking_id as string)}<table cellpadding="0" cellspacing="0" style="width:100%;">${dr('Client', b.client_name as string)}${dr('Email', b.email as string)}${dr('Phone', b.phone as string)}${dr('Summary', b.client_summary as string || '—')}${b.total_amount ? dr('Amount', `${b.currency} ${Number(b.total_amount).toLocaleString()}`) : ''}${b.notes ? dr('Notes', b.notes as string) : ''}</table>`);
++// ── Personalised email templates per booking type ────────────────────────────
++function bookingTypeLabel(b: Record<string, unknown>): string {
++  if (b.booking_type === 'studio') {
++    if (b.studio_use === 'content') return '🎬 Content Creation Session';
++    return '📸 Photography / Photoshoot';
++  }
++  if (b.occasion === 'bridal') return '💍 Bridal Glam';
++  if (b.occasion === 'special') return '✨ Special Request Glam';
++  const svc = b.service_type === 'makeup+gele' ? 'Makeup + Gele' : b.service_type === 'gele' ? 'Gele' : 'Makeup';
++  return `💄 ${svc} — General Glam`;
++}
++
++function bookingGreeting(b: Record<string, unknown>): string {
++  if (b.booking_type === 'studio' && b.studio_use === 'content') {
++    return `Hi <b>${b.client_name}</b>, your content creation session has been received! We're getting the studio ready for you.`;
++  }
++  if (b.booking_type === 'studio') {
++    return `Hi <b>${b.client_name}</b>, your photoshoot booking is in! We'll have the lights, backdrop, and good energy waiting for you.`;
++  }
++  if (b.occasion === 'bridal') {
++    return `Hi <b>${b.client_name}</b>, your bridal glam request has landed safely with us! 💍 This is a special one and we are so honoured to be part of your day.`;
++  }
++  if (b.occasion === 'special') {
++    return `Hi <b>${b.client_name}</b>, your special request has been received! ✨ We'll review and reach out to you shortly.`;
++  }
++  return `Hi <b>${b.client_name}</b>, your glam booking is in and we are already excited to work on you! 💄`;
++}
++
++function confirmGreeting(b: Record<string, unknown>): string {
++  if (b.booking_type === 'studio' && b.studio_use === 'content') {
++    return `Hi <b>${b.client_name}</b>, your content creation session is confirmed! 🎬 The studio will be set up and ready for you.`;
++  }
++  if (b.booking_type === 'studio') {
++    return `Hi <b>${b.client_name}</b>, your photoshoot is confirmed! 📸 Get ready to look amazing — we'll have everything ready.`;
++  }
++  if (b.occasion === 'bridal') {
++    return `Hi <b>${b.client_name}</b>, your bridal booking is confirmed! 💍 We are so honoured to be part of your special day. See you soon!`;
++  }
++  return `Hi <b>${b.client_name}</b>, your glam session is confirmed! 💄 We can't wait to meet you!`;
++}
++
++function reminderBody(b: Record<string, unknown>): string {
++  const isStudio = b.booking_type === 'studio';
++  const isContent = isStudio && b.studio_use === 'content';
++  if (isContent) {
++    return `Your content creation session at ${STUDIO} is in <b>2 hours</b> 🎬<br><br>We're setting up the studio for you. Make sure your content ideas, outfits, and props are ready. See you soon!`;
++  }
++  if (isStudio) {
++    return `Your photoshoot session at ${STUDIO} is in <b>2 hours</b> 📸<br><br>We're getting the studio and equipment ready. Please arrive at least 10–15 minutes early so we can settle in before your slot. Looking forward to creating magic with you!`;
++  }
++  if (b.occasion === 'bridal') {
++    return `Your bridal glam session at ${STUDIO} is in <b>2 hours</b> 💍<br><br>Our artist is already preparing for your special day. Please come with your hair prepped and a top that unbuttons (to avoid smudging your makeup). We are so excited for you!`;
++  }
++  return `Your glam session at ${STUDIO} is in <b>2 hours</b> 💄<br><br>Our artist will be ready and waiting. Please arrive a few minutes early and come with a clean face if possible. See you soon!`;
++}
++
++const tplReceived = (b: Record<string, unknown>) => shell(
++  `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">Booking received ✓</h2>
++   <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#c8788a;text-transform:uppercase;letter-spacing:0.1em;">${bookingTypeLabel(b)}</p>
++   <p style="margin:0 0 20px;font-size:13px;color:#7a5090;">${bookingGreeting(b)}</p>
++   ${ib(b.booking_id as string)}
++   <table cellpadding="0" cellspacing="0">
++     ${dr('Service', bookingTypeLabel(b))}
++     ${dr('Summary', b.client_summary as string || '—')}
++     ${b.preferred_date ? dr('Date', b.preferred_date as string) : ''}
++     ${b.start_time ? dr('Time', b.start_time as string) : ''}
++     ${b.total_amount ? dr('Amount', b.currency + ' ' + Number(b.total_amount).toLocaleString()) : ''}
++     ${dr('Status', '⏳ Pending verification')}
++   </table>
++   ${payHtml()}${rulesHtml()}
++   <p style="margin-top:18px;font-size:12px;color:#9a7090;">📍 <b>${ADDRESS}</b> · 📞 ${PHONE}</p>`
++);
++
++const tplBridal = (b: Record<string, unknown>) => shell(
++  `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">${b.occasion === 'bridal' ? 'Bridal request received 💍' : 'Special request received ✨'}</h2>
++   <p style="margin:0 0 20px;font-size:13px;color:#7a5090;">${bookingGreeting(b)}</p>
++   ${ib(b.booking_id as string)}
++   <div style="background:#f0faf5;border-radius:12px;border:1px solid rgba(40,160,100,0.2);padding:16px 18px;">
++     <p style="margin:0;font-size:13px;color:#2a6a45;line-height:1.6;">Our team will reach out to you shortly to discuss your needs and confirm pricing. Keep your booking ID safe.</p>
++   </div>
++   <p style="margin-top:16px;font-size:12px;color:#9a7090;">📍 <b>${ADDRESS}</b> · 📞 ${PHONE}</p>`
++);
++
++const tplConfirmed = (b: Record<string, unknown>) => shell(
++  `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">You're confirmed! 🎉</h2>
++   <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#c8788a;text-transform:uppercase;letter-spacing:0.1em;">${bookingTypeLabel(b)}</p>
++   <p style="margin:0 0 20px;font-size:13px;color:#7a5090;">${confirmGreeting(b)}</p>
++   ${ib(b.booking_id as string)}
++   <div style="background:#f0faf5;border-radius:12px;padding:16px 18px;margin-bottom:16px;">
++     <table cellpadding="0" cellspacing="0">
++       ${dr('Name', b.client_name as string)}
++       ${b.preferred_date ? dr('Date', b.preferred_date as string) : ''}
++       ${b.start_time ? dr('Time', b.start_time as string) : ''}
++       ${b.total_amount ? dr('Amount', b.currency + ' ' + Number(b.total_amount).toLocaleString()) : ''}
++       ${dr('Status', '✅ Confirmed')}
++     </table>
++   </div>
++   ${b.admin_note ? '<div style="background:#fffbf0;border-radius:12px;border:1px solid #f0e4b8;padding:14px 18px;margin-bottom:14px;"><p style="margin:0;font-size:13px;color:#6a5020;">' + b.admin_note + '</p></div>' : ''}
++   <p style="font-size:12px;color:#7a5090;">📍 <b>${ADDRESS}</b> — please arrive 15 minutes early. Questions? Call or WhatsApp us on ${PHONE}.</p>`
++);
++
++const tplRejected = (b: Record<string, unknown>) => shell(
++  `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">Update on your booking</h2>
++   <p style="margin:0 0 20px;font-size:13px;color:#7a5090;">Hi <b>${b.client_name}</b>, unfortunately we can't confirm this booking at this time.</p>
++   ${ib(b.booking_id as string)}
++   ${b.admin_note ? '<div style="background:#fff4f4;border-radius:12px;border:1px solid #f0c8c8;padding:14px 18px;margin-bottom:16px;"><p style="margin:0;font-size:13px;color:#6a2020;">' + b.admin_note + '</p></div>' : ''}
++   <p style="font-size:13px;color:#7a5090;">We'd love to find another time that works — feel free to rebook. You can reach us on ${PHONE}.</p>`
++);
++
++const tplAdmin = (b: Record<string, unknown>) => shell(
++  `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">New booking — action needed</h2>
++   <p style="margin:0 0 16px;font-size:12px;font-weight:700;color:#c8788a;text-transform:uppercase;">${bookingTypeLabel(b)}</p>
++   ${ib(b.booking_id as string)}
++   <table cellpadding="0" cellspacing="0" style="width:100%;">
++     ${dr('Client', b.client_name as string)}
++     ${dr('Email', b.email as string)}
++     ${dr('Phone', b.phone as string)}
++     ${dr('Service', bookingTypeLabel(b))}
++     ${dr('Summary', b.client_summary as string || '—')}
++     ${b.preferred_date ? dr('Date', b.preferred_date as string) : ''}
++     ${b.start_time ? dr('Time', b.start_time as string) : ''}
++     ${b.total_amount ? dr('Amount', b.currency + ' ' + Number(b.total_amount).toLocaleString()) : ''}
++     ${b.notes ? dr('Notes', b.notes as string) : ''}
++   </table>`
++);
++
++// ── Reminder template (2 hours before session) ────────────────────────────────
++const tplReminder = (b: Record<string, unknown>) => shell(
++  `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">See you in 2 hours! ⏰</h2>
++   <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#c8788a;text-transform:uppercase;letter-spacing:0.1em;">${bookingTypeLabel(b)}</p>
++   <p style="margin:0 0 20px;font-size:13px;color:#7a5090;">Hi <b>${b.client_name}</b>! Just a friendly reminder:</p>
++   <div style="background:#f8f0ff;border-radius:12px;border:1px solid #ddd0f5;padding:16px 18px;margin-bottom:16px;">
++     <p style="margin:0;font-size:13px;color:#5a3090;line-height:1.7;">${reminderBody(b)}</p>
++   </div>
++   ${ib(b.booking_id as string)}
++   <table cellpadding="0" cellspacing="0">
++     ${b.preferred_date ? dr('Date', b.preferred_date as string) : ''}
++     ${b.start_time ? dr('Booked time', b.start_time as string) : ''}
++   </table>
++   <p style="margin-top:16px;font-size:12px;color:#9a7090;">📍 <b>${ADDRESS}</b> · 📞 ${PHONE}</p>
++   <p style="margin-top:8px;font-size:12px;color:#9a7090;">Thank you for choosing ${STUDIO} — we can't wait to see you! 🌸</p>`
++);
+ 
+ async function notifySubmission(fs: Firestore, b: Record<string, unknown>) {
+   // notify admin
+   try {
+-    const adminEmail = await fs.getConfig('gmail_email') || '';
+-    if (adminEmail) await sendMail(fs, adminEmail, `[${STUDIO}] New booking — ${b.booking_id}`, tplAdmin(b));
++    const adminEmail = await fs.getConfig('smtp_user') || await fs.getConfig('gmail_email') || '';
++    if (adminEmail) await sendMail(fs, adminEmail,
++      `[${STUDIO}] New booking — ${b.booking_id} | ${b.booking_type === 'studio' ? (b.studio_use === 'content' ? 'Content Creation' : 'Photoshoot') : String(b.occasion || 'Glam')}`,
++      tplAdmin(b));
+   } catch (e: unknown) { console.error('admin notify:', (e as Error).message); }
+-  // notify client
+-  const isCS = b.occasion === 'bridal' || b.occasion === 'special';
++  // notify client — personalised per type
++  const isBridalOrSpecial = b.occasion === 'bridal' || b.occasion === 'special';
++  const clientEmail = (b.email as string || '').trim();
++  if (!clientEmail) { console.error('client notify: no email address'); return; }
+   try {
+-    await sendMail(fs, b.email as string,
+-      isCS ? `${b.occasion === 'bridal' ? 'Bridal' : 'Special'} request received — ${b.booking_id} | ${STUDIO}`
+-           : `Booking received — ${b.booking_id} | ${STUDIO}`,
+-      isCS ? tplBridal(b) : tplReceived(b));
++    let subject: string;
++    let html: string;
++    if (b.booking_type === 'studio') {
++      const svcLabel = b.studio_use === 'content' ? 'Content Creation' : 'Photoshoot';
++      subject = `${svcLabel} booking received — ${b.booking_id} | ${STUDIO}`;
++      html = tplReceived(b);
++    } else if (isBridalOrSpecial) {
++      subject = `${b.occasion === 'bridal' ? 'Bridal' : 'Special'} request received — ${b.booking_id} | ${STUDIO}`;
++      html = tplBridal(b);
++    } else {
++      subject = `Glam booking received — ${b.booking_id} | ${STUDIO}`;
++      html = tplReceived(b);
++    }
++    await sendMail(fs, clientEmail, subject, html);
+   } catch (e: unknown) { console.error('client notify:', (e as Error).message); }
+ }
+ 
+@@ -486,7 +648,7 @@ Deno.serve(async (req: Request) => {
+     if (action === 'saveDraft') {
+       const p = (body.booking || {}) as Record<string, unknown>;
+       if (!p.booking_type) return j({ error: 'booking_type required' }, 400);
+-      const id = (p.booking_id as string) || bid(p.booking_type === 'glam' ? 'GLM' : 'STU');
++      const id = (p.booking_id as string) || bid(p.booking_type as string);
+       const ex = p.booking_id ? await findBooking(fs, p.booking_id as string) : null;
+       let saved: Record<string, unknown>;
+       if (ex) saved = await fs.update('bookings', ex.id as string, norm(p, id, 'draft', ex));
+@@ -499,7 +661,7 @@ Deno.serve(async (req: Request) => {
+       const p = (body.booking || {}) as Record<string, unknown>;
+       const miss = validate(p);
+       if (miss.length) return j({ error: `Missing: ${miss.join(', ')}` }, 400);
+-      const id = (p.booking_id as string) || bid(p.booking_type === 'glam' ? 'GLM' : 'STU');
++      const id = (p.booking_id as string) || bid(p.booking_type as string);
+       const ex = p.booking_id ? await findBooking(fs, p.booking_id as string) : null;
+       let saved: Record<string, unknown>;
+       if (ex) saved = await fs.update('bookings', ex.id as string, norm(p, id, 'submitted', ex));
+@@ -519,12 +681,15 @@ Deno.serve(async (req: Request) => {
+ 
+     // ── searchBookings ────────────────────────────────────────────────────────
+     if (action === 'searchBookings') {
+-      const q = (body.query as string || '').toLowerCase();
++      // Accept body.query OR body.email OR body.phone (frontend may send either form)
++      const q = (
++        (body.query as string) || (body.email as string) || (body.phone as string) || ''
++      ).toLowerCase().trim();
+       if (!q) return j({ bookings: [] });
+       const all = await fs.query('bookings', [], '-created_date');
+       const hits = all.filter(b =>
+         [b.booking_id, b.client_name, b.email, b.phone].some(v => String(v || '').toLowerCase().includes(q))
+-      ).slice(0, 10);
++      ).slice(0, 20);
+       return j({ ok: true, bookings: hits.map(clean) });
+     }
+ 
+@@ -740,6 +905,76 @@ Deno.serve(async (req: Request) => {
+       return j({ ok: true, email });
+     }
+ 
++    // ── sendReminder ──────────────────────────────────────────────────────────
++    if (action === 'sendReminder') {
++      const b = await findBooking(fs, body.bookingId as string);
++      if (!b || !b.email) return j({ error: 'Booking not found or no email' }, 404);
++      try {
++        await sendMail(fs, b.email as string,
++          `Reminder: your session is in 2 hours — ${b.booking_id} | ${STUDIO}`,
++          tplReminder(b));
++        return j({ ok: true });
++      } catch(e: unknown) { return j({ error: (e as Error).message }, 500); }
++    }
++
++    // ── saveShopOrder ─────────────────────────────────────────────────────────
++    if (action === 'saveShopOrder') {
++      const o = (body.order || {}) as Record<string, unknown>;
++      if (!o.name || !o.phone) return j({ error: 'Name and phone required' }, 400);
++      const orderId = 'ORD-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '-' + Math.random().toString(36).slice(2,5).toUpperCase();
++      const saved = await fs.create('shop_orders', {
++        order_id: orderId, client_name: o.name || '', phone: o.phone || '',
++        email: o.email || '', delivery_type: o.delivery_type || 'pickup',
++        items: JSON.stringify(o.items || []), total_amount: Number(o.total_amount || 0),
++        currency: 'NGN', status: 'pending', notes: o.notes || '',
++      });
++      const adminEmail = await fs.getConfig('smtp_user') || await fs.getConfig('gmail_email') || '';
++      if (adminEmail) {
++        const itemRows = (o.items as Array<{name:string;qty:number;price:number}> || [])
++          .map(i => dr(i.name, `x${i.qty} — NGN ${(i.price*i.qty).toLocaleString()}`)).join('');
++        try {
++          await sendMail(fs, adminEmail, `[${STUDIO}] New shop order — ${orderId}`,
++            shell(`<h2 style="margin:0 0 16px;font-size:20px;font-weight:800;color:#3d1f6e;">New shop order 🛒</h2>
++              <table cellpadding="0" cellspacing="0" style="width:100%;">
++                ${dr('Order ID', orderId)}${dr('Client', String(o.name))}${dr('Phone', String(o.phone))}
++                ${o.email ? dr('Email', String(o.email)) : ''}
++                ${dr('Delivery', o.delivery_type === 'home' ? 'Home Delivery' : 'Self Pickup')}
++                ${dr('Total', 'NGN ' + Number(o.total_amount).toLocaleString())}
++              </table>
++              <div style="margin-top:16px;padding:14px 18px;background:#f8f4ff;border-radius:12px;">
++                <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#3d1f6e;text-transform:uppercase;">Items ordered</p>
++                <table cellpadding="0" cellspacing="0">${itemRows}</table>
++              </div>`));
++        } catch(e: unknown) { console.error('shop order admin email:', (e as Error).message); }
++      }
++      return j({ ok: true, orderId, order: saved });
++    }
++
++    // ── adminGetShopOrders ────────────────────────────────────────────────────
++    if (action === 'adminGetShopOrders') {
++      await checkPin(fs, body.pin as string);
++      const orders = await fs.query('shop_orders', [], '-created_date');
++      return j({ ok: true, orders });
++    }
++
++    // ── adminUpdateShopOrder ──────────────────────────────────────────────────
++    if (action === 'adminUpdateShopOrder') {
++      await checkPin(fs, body.pin as string);
++      const orders = await fs.query('shop_orders', [{ field: 'order_id', op: 'EQUAL', value: body.orderId as string }], '-created_date', 1);
++      if (!orders[0]) return j({ error: 'Order not found' }, 404);
++      const updated = await fs.update('shop_orders', orders[0].id as string, { status: body.status as string, notes: (body.notes as string) || String(orders[0].notes || '') });
++      return j({ ok: true, order: updated });
++    }
++
++    // ── adminDeleteShopOrder ──────────────────────────────────────────────────
++    if (action === 'adminDeleteShopOrder') {
++      await checkPin(fs, body.pin as string);
++      const orders = await fs.query('shop_orders', [{ field: 'order_id', op: 'EQUAL', value: body.orderId as string }], '-created_date', 1);
++      if (!orders[0]) return j({ error: 'Order not found' }, 404);
++      await fs.delete('shop_orders', orders[0].id as string);
++      return j({ ok: true });
++    }
++
+     return j({ error: 'Unknown action' }, 400);
+   } catch (e: unknown) {
+     console.error(e);
+diff --git a/src/components/AdminOrdersTab.jsx b/src/components/AdminOrdersTab.jsx
+new file mode 100644
+index 0000000..59f8ebb
+--- /dev/null
++++ b/src/components/AdminOrdersTab.jsx
+@@ -0,0 +1,194 @@
++import { useEffect, useState } from 'react';
++import { Trash2, RefreshCw, CheckCircle2, Clock, PackageSearch, ChevronDown, ChevronUp } from 'lucide-react';
++import { bookingApi } from '../utils/bookingApi';
++import { useToast } from '../hooks/useToast';
++
++const STATUS_STYLES = {
++  pending:   'bg-[#fff4e0] text-[#a07428] border-[#f0d898]',
++  viewed:    'bg-[#f0f4ff] text-[#3a5aaa] border-[#b8c8f0]',
++  done:      'bg-[#f0faf3] text-[#3d7a53] border-[#b8e0c8]',
++  cancelled: 'bg-[#fff0f0] text-[#a84040] border-[#f0c8c8]',
++};
++
++const FILTERS = ['all','pending','viewed','done','cancelled'];
++
++function Badge({ status }) {
++  return <span className={`px-2.5 py-0.5 rounded-full text-[10px] uppercase tracking-[0.18em] font-semibold border ${STATUS_STYLES[status]||STATUS_STYLES.pending}`}>{status}</span>;
++}
++
++export default function AdminOrdersTab({ pin }) {
++  const [orders, setOrders] = useState([]);
++  const [loading, setLoading] = useState(true);
++  const [filter, setFilter] = useState('all');
++  const [expanded, setExpanded] = useState(null);
++  const [updating, setUpdating] = useState('');
++  const { showToast } = useToast();
++
++  async function load() {
++    try {
++      setLoading(true);
++      const { orders: list } = await bookingApi.adminGetShopOrders(pin);
++      setOrders(list || []);
++    } catch(e) { showToast(e.message, 'error'); }
++    finally { setLoading(false); }
++  }
++  useEffect(() => { load(); }, []);
++
++  async function updateStatus(orderId, status) {
++    try {
++      setUpdating(orderId);
++      await bookingApi.adminUpdateShopOrder(pin, orderId, status, '');
++      setOrders(prev => prev.map(o => o.order_id === orderId ? { ...o, status } : o));
++      showToast(`Order marked as ${status}.`, 'success');
++    } catch(e) { showToast(e.message, 'error'); }
++    finally { setUpdating(''); }
++  }
++
++  async function del(orderId) {
++    if (!window.confirm('Delete this order permanently?')) return;
++    try {
++      await bookingApi.adminDeleteShopOrder(pin, orderId);
++      setOrders(prev => prev.filter(o => o.order_id !== orderId));
++      showToast('Order deleted.', 'success');
++    } catch(e) { showToast(e.message, 'error'); }
++  }
++
++  const visible = filter === 'all' ? orders : orders.filter(o => o.status === filter);
++  const pendingCount = orders.filter(o => o.status === 'pending').length;
++
++  return (
++    <div className="space-y-5 max-w-2xl">
++      {/* header */}
++      <div className="flex items-center justify-between gap-3 flex-wrap">
++        <div>
++          <p className="font-semibold text-[#1c1214]">Shop Orders</p>
++          <p className="text-xs text-[#9a7080]">
++            {orders.length} total
++            {pendingCount > 0 && <span className="ml-2 inline-flex items-center gap-1 text-[#a07428] font-semibold"><Clock size={10}/> {pendingCount} pending</span>}
++          </p>
++        </div>
++        <button type="button" onClick={load} className="w-9 h-9 rounded-full border border-[#eecdd4] bg-white flex items-center justify-center shadow-sm">
++          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} style={{animationDuration:'1.5s'}}/>
++        </button>
++      </div>
++
++      {/* filters */}
++      <div className="flex gap-2 flex-wrap">
++        {FILTERS.map(f => (
++          <button key={f} type="button" onClick={() => setFilter(f)}
++            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all capitalize ${filter===f?'bg-[#3d1f6e] text-white border-transparent':'bg-white border-[#eecdd4] text-[#7a5460]'}`}>
++            {f === 'all' ? `All (${orders.length})` : `${f} (${orders.filter(o=>o.status===f).length})`}
++          </button>
++        ))}
++      </div>
++
++      {loading && <div className="rose-card p-5 text-sm text-[#9a7080]">Loading orders…</div>}
++
++      {!loading && visible.length === 0 && (
++        <div className="rose-card p-10 text-center">
++          <PackageSearch size={32} className="mx-auto text-[#e8c4cc] mb-3"/>
++          <p className="text-sm text-[#9a7080]">No {filter !== 'all' ? filter : ''} orders yet.</p>
++        </div>
++      )}
++
++      <div className="space-y-3">
++        {visible.map(o => {
++          let items = [];
++          try { items = JSON.parse(o.items || '[]'); } catch {}
++          const isExp = expanded === o.order_id;
++          const busy = updating === o.order_id;
++
++          return (
++            <div key={o.order_id} className="glass-card overflow-hidden">
++              <button type="button" onClick={() => setExpanded(isExp ? null : o.order_id)}
++                className="w-full text-left p-4 flex items-start gap-3">
++                <div className="flex-1 min-w-0">
++                  <div className="flex items-center gap-2 mb-1 flex-wrap">
++                    <p className="font-semibold text-sm text-[#3d1f6e]">{o.client_name}</p>
++                    <Badge status={o.status || 'pending'}/>
++                    {o.delivery_type === 'home' && (
++                      <span className="px-2 py-0.5 rounded-full bg-[#f0e8ff] text-[#6b3fa0] text-[9px] font-semibold border border-[#d4b8f0]">HOME DELIVERY</span>
++                    )}
++                  </div>
++                  <p className="font-mono text-xs text-[#9a7080]">{o.order_id}</p>
++                  <p className="text-xs text-[#7a5460] mt-0.5">{o.phone} · ₦{Number(o.total_amount||0).toLocaleString()}</p>
++                  <p className="text-[10px] text-[#9a7080] mt-0.5">{items.length} item{items.length!==1?'s':''}</p>
++                </div>
++                {isExp ? <ChevronUp size={15} className="text-[#9a7080] shrink-0 mt-1"/> : <ChevronDown size={15} className="text-[#9a7080] shrink-0 mt-1"/>}
++              </button>
++
++              {isExp && (
++                <div className="px-4 pb-4 space-y-3 border-t border-[#eecdd4] pt-3">
++                  {/* items list */}
++                  {items.length > 0 && (
++                    <div className="rounded-xl bg-[#fdf8f5] border border-[#eed4da] p-3 space-y-1.5">
++                      <p className="text-[10px] font-bold text-[#3d1f6e] uppercase tracking-[0.18em] mb-2">Items ordered</p>
++                      {items.map((i,idx) => (
++                        <div key={idx} className="flex items-center justify-between text-xs">
++                          <span className="text-[#5a3a42]">{i.name} ×{i.qty}</span>
++                          <span className="font-semibold text-[#3d1f6e]">₦{(i.price*i.qty).toLocaleString()}</span>
++                        </div>
++                      ))}
++                      <div className="flex items-center justify-between text-sm font-bold text-[#c8788a] pt-2 border-t border-[#eecdd4] mt-1">
++                        <span>Total</span><span>₦{Number(o.total_amount||0).toLocaleString()}</span>
++                      </div>
++                    </div>
++                  )}
++                  {/* contact */}
++                  <div className="grid grid-cols-2 gap-2 text-xs">
++                    <div className="rounded-xl bg-white border border-[#eed4da] px-3 py-2">
++                      <p className="text-[8px] uppercase tracking-[0.2em] text-[#9a7080] mb-0.5">Phone</p>
++                      <p className="text-[#3d1f6e] font-semibold">{o.phone}</p>
++                    </div>
++                    {o.email && (
++                      <div className="rounded-xl bg-white border border-[#eed4da] px-3 py-2">
++                        <p className="text-[8px] uppercase tracking-[0.2em] text-[#9a7080] mb-0.5">Email</p>
++                        <p className="text-[#3d1f6e] font-semibold truncate">{o.email}</p>
++                      </div>
++                    )}
++                    <div className="rounded-xl bg-white border border-[#eed4da] px-3 py-2">
++                      <p className="text-[8px] uppercase tracking-[0.2em] text-[#9a7080] mb-0.5">Delivery</p>
++                      <p className="text-[#3d1f6e] font-semibold">{o.delivery_type === 'home' ? 'Home delivery' : 'Self pickup'}</p>
++                    </div>
++                    {o.notes && (
++                      <div className="col-span-2 rounded-xl bg-[#fffbf0] border border-[#f0e4b8] px-3 py-2">
++                        <p className="text-[8px] uppercase tracking-[0.2em] text-[#a07428] mb-0.5">Notes</p>
++                        <p className="text-[#6a5020]">{o.notes}</p>
++                      </div>
++                    )}
++                  </div>
++
++                  {/* actions */}
++                  <div className="flex gap-2 flex-wrap">
++                    {o.status !== 'viewed' && (
++                      <button type="button" onClick={() => updateStatus(o.order_id, 'viewed')} disabled={busy}
++                        className="flex-1 py-2.5 rounded-xl bg-[#f0f4ff] border border-[#b8c8f0] text-[#3a5aaa] text-xs font-semibold disabled:opacity-50">
++                        Mark viewed
++                      </button>
++                    )}
++                    {o.status !== 'done' && (
++                      <button type="button" onClick={() => updateStatus(o.order_id, 'done')} disabled={busy}
++                        className="flex-1 py-2.5 rounded-xl bg-[#f0faf3] border border-[#b8e0c8] text-[#3d7a53] text-xs font-semibold flex items-center justify-center gap-1 disabled:opacity-50">
++                        <CheckCircle2 size={11}/> Done
++                      </button>
++                    )}
++                    {o.status !== 'pending' && (
++                      <button type="button" onClick={() => updateStatus(o.order_id, 'pending')} disabled={busy}
++                        className="flex-1 py-2.5 rounded-xl border border-[#eecdd4] text-[#7a5460] text-xs font-semibold disabled:opacity-50">
++                        Back to pending
++                      </button>
++                    )}
++                    <button type="button" onClick={() => del(o.order_id)} disabled={busy}
++                      className="w-10 py-2.5 rounded-xl border border-[#f0c8c8] bg-white text-[#b05860] flex items-center justify-center disabled:opacity-50">
++                      <Trash2 size={12}/>
++                    </button>
++                  </div>
++                </div>
++              )}
++            </div>
++          );
++        })}
++      </div>
++    </div>
++  );
++}
+diff --git a/src/components/Footer.jsx b/src/components/Footer.jsx
+index 9630e28..963533d 100644
+--- a/src/components/Footer.jsx
++++ b/src/components/Footer.jsx
+@@ -7,12 +7,16 @@ const WhatsAppIcon = () => (
+     <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+   </svg>
+ );
+-
+ const InstagramIcon = () => (
+   <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+     <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+   </svg>
+ );
++const TikTokIcon = () => (
++  <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
++    <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.32 6.32 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V8.69a8.18 8.18 0 004.78 1.52V6.75a4.85 4.85 0 01-1.01-.06z"/>
++  </svg>
++);
+ 
+ const USP_ITEMS = [
+   { icon: '💎', title: 'Professional',        desc: 'Experienced artists with skill and passion.' },
+@@ -47,20 +51,21 @@ export default function Footer() {
+       {/* ── Main footer body ── */}
+       <div style={{ background: '#f7ecf1', borderTop: '1px solid rgba(200,120,138,0.15)' }}>
+         <div className="max-w-7xl mx-auto px-5 lg:px-12 py-10">
+-          {/* Brand row - always full width above the 3 columns */}
+-          <div className="mb-8 pb-6 border-b" style={{ borderColor: 'rgba(107,63,160,0.12)' }}>
++
++          {/* Brand */}
++          <div className="mb-8">
+             <p className="font-display text-2xl text-[#3d1f6e] font-bold">Beccastouch <span className="text-[#c8788a] italic">Studio</span></p>
+-            <p className="text-[#8a5070] text-sm mt-1">Glam sessions, studio space rental for photography and content creation, beauty products shop — under one roof.</p>
++            <p className="text-[#8a5070] text-sm mt-1 max-w-md">Glam sessions, photography, content creation studio, and beauty products — all in one place.</p>
+           </div>
+ 
+-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-0">
++          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-6">
+ 
+             {/* Column 1: Contact */}
+-            <div className="md:pr-8 md:border-r" style={{ borderColor: 'rgba(107,63,160,0.12)' }}>
++            <div>
+               <p className="text-[#6b3fa0] text-[10px] uppercase tracking-[0.3em] font-semibold mb-4">Contact Us</p>
+               <div className="flex flex-col gap-3">
+                 <a href={`tel:${SITE.phone?.replace(/\s/g,'')}`}
+-                  className="flex items-center gap-3 text-[#4a2060] hover:text-[#c8788a] text-sm transition-colors group">
++                  className="flex items-center gap-3 text-[#4a2060] hover:text-[#c8788a] text-sm transition-colors">
+                   <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+                     style={{ background: 'linear-gradient(135deg,#fce4ea,#f0d4f8)', border: '1px solid rgba(200,120,138,0.2)' }}>
+                     <Phone size={13} className="text-[#c8788a]"/>
+@@ -68,43 +73,56 @@ export default function Footer() {
+                   {SITE.phone}
+                 </a>
+                 <a href={`https://wa.me/${SITE.whatsapp}`} target="_blank" rel="noreferrer"
+-                  className="flex items-center gap-3 text-[#4a2060] hover:text-[#25d366] text-sm transition-colors group">
++                  className="flex items-center gap-3 text-[#4a2060] hover:text-[#25d366] text-sm transition-colors">
+                   <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+                     style={{ background: 'linear-gradient(135deg,#e4f8ea,#d8f0e0)', border: '1px solid rgba(37,211,102,0.2)' }}>
+                     <WhatsAppIcon />
+                   </span>
+                   {SITE.phone} <span className="text-[10px] text-[#8a9080] ml-0.5">(WhatsApp)</span>
+                 </a>
+-                <span className="flex items-center gap-3 text-[#4a2060] text-sm">
+-                  <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
++                <span className="flex items-start gap-3 text-[#4a2060] text-sm">
++                  <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5"
+                     style={{ background: 'linear-gradient(135deg,#fce4ea,#f5e0d0)', border: '1px solid rgba(200,120,80,0.2)' }}>
+                     <MapPin size={13} className="text-[#c87850]"/>
+                   </span>
+-                  {SITE.location}
++                  <span className="leading-relaxed">{SITE.location}</span>
+                 </span>
+-                <a href={SITE.instagram || '#'} target="_blank" rel="noreferrer"
+-                  className="flex items-center gap-3 text-[#4a2060] hover:text-[#e1306c] text-sm transition-colors group">
+-                  <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
++                {/* Social row */}
++                <div className="flex items-center gap-2 mt-1">
++                  <a href={SITE.instagram} target="_blank" rel="noreferrer"
++                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#4a2060] hover:text-[#e1306c] transition-colors"
+                     style={{ background: 'linear-gradient(135deg,#fce4f0,#f8d4e8)', border: '1px solid rgba(225,48,108,0.2)' }}>
+                     <InstagramIcon />
+-                  </span>
+-                  @beccastouch
+-                </a>
++                  </a>
++                  <a href={SITE.tiktok} target="_blank" rel="noreferrer"
++                    className="w-8 h-8 rounded-full flex items-center justify-center text-[#4a2060] hover:text-black transition-colors"
++                    style={{ background: 'linear-gradient(135deg,#f0e8f8,#e8e0f0)', border: '1px solid rgba(107,63,160,0.2)' }}>
++                    <TikTokIcon />
++                  </a>
++                  <div className="ml-1">
++                    <a href={SITE.instagram} target="_blank" rel="noreferrer" className="text-[10px] text-[#9a6080] block hover:text-[#e1306c]">@beccastouch</a>
++                    <a href={SITE.tiktok} target="_blank" rel="noreferrer" className="text-[10px] text-[#9a6080] block hover:text-black">@beccastouch</a>
++                  </div>
++                </div>
+               </div>
+             </div>
+ 
++            {/* Dividers */}
++            <div className="hidden md:block w-px self-stretch mx-auto" style={{ background: 'rgba(107,63,160,0.12)' }} />
++            <div className="block md:hidden h-px w-full" style={{ background: 'rgba(107,63,160,0.1)' }} />
++
+             {/* Column 2: Opening Hours */}
+-            <div className="md:px-8 md:border-r" style={{ borderColor: 'rgba(107,63,160,0.12)' }}>
++            <div>
+               <p className="text-[#6b3fa0] text-[10px] uppercase tracking-[0.3em] font-semibold mb-4">Opening Hours</p>
+               <div className="flex flex-col gap-3">
+                 <div className="flex items-start gap-3">
+                   <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+-                    style={{ background: 'linear-gradient(135deg,#f8e4e8,#f4d4dc)', border: '1px solid rgba(200,120,138,0.2)' }}>
+-                    <Clock size={13} className="text-[#c8788a]"/>
++                    style={{ background: 'linear-gradient(135deg,#fce4ea,#f0d4f8)', border: '1px solid rgba(155,114,208,0.2)' }}>
++                    <Clock size={13} className="text-[#9b72d0]"/>
+                   </span>
+                   <div>
+-                    <p className="text-[#3d1f6e] font-semibold text-sm">{OPENING_HOURS?.weekdays?.label || 'Monday – Saturday'}</p>
+-                    <p className="text-[#8a6070] text-xs mt-0.5">{OPENING_HOURS?.weekdays?.hours || '8:00 AM – 6:00 PM'}</p>
++                    <p className="text-[#3d1f6e] font-semibold text-sm">{OPENING_HOURS?.weekdays?.label}</p>
++                    <p className="text-[#8a6070] text-xs mt-0.5">{OPENING_HOURS?.weekdays?.hours}</p>
+                   </div>
+                 </div>
+                 <div className="h-px ml-11" style={{ background: 'rgba(107,63,160,0.1)' }} />
+@@ -114,37 +132,42 @@ export default function Footer() {
+                     <Clock size={13} className="text-[#9b72d0]"/>
+                   </span>
+                   <div>
+-                    <p className="text-[#3d1f6e] font-semibold text-sm">{OPENING_HOURS?.sunday?.label || 'Sunday'}</p>
+-                    <p className="text-[#8a6070] text-xs mt-0.5">{OPENING_HOURS?.sunday?.hours || 'Home service requests only'}</p>
++                    <p className="text-[#3d1f6e] font-semibold text-sm">{OPENING_HOURS?.sunday?.label}</p>
++                    <p className="text-[#8a6070] text-xs mt-0.5">{OPENING_HOURS?.sunday?.hours}</p>
+                   </div>
+                 </div>
+               </div>
+             </div>
+ 
++            {/* Dividers */}
++            <div className="hidden md:block w-px self-stretch mx-auto" style={{ background: 'rgba(107,63,160,0.12)' }} />
++            <div className="block md:hidden h-px w-full" style={{ background: 'rgba(107,63,160,0.1)' }} />
++
+             {/* Column 3: Book CTA */}
+-            <div className="md:pl-8">
++            <div>
+               <div className="rounded-2xl p-6 flex flex-col items-center text-center"
+-                style={{ background: 'linear-gradient(135deg,#5a1f8e,#7a3fa8)', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 8px 32px rgba(90,31,142,0.25)' }}>
+-                <div className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center mb-4">
+-                  <Calendar size={18} className="text-white"/>
++                style={{ background: 'linear-gradient(135deg,#3d1f6e,#6b3fa0)', border: '1px solid rgba(155,114,208,0.3)' }}>
++                <Calendar size={22} className="text-[#f0d4f8] mb-3"/>
++                <p className="font-display text-xl text-white mb-1">Book a session</p>
++                <p className="text-[#d4b8e8] text-xs mb-4">Studio, glam, or just a quick query — we're here.</p>
++                <div className="flex gap-2 flex-wrap justify-center">
++                  <Link to="/book-studio" className="px-4 py-2 rounded-full bg-white/20 text-white text-xs font-semibold hover:bg-white/30 transition-all border border-white/20">Studio</Link>
++                  <Link to="/book-glam" className="px-4 py-2 rounded-full bg-[#c8788a] text-white text-xs font-semibold hover:bg-[#d4889a] transition-all">Glam</Link>
+                 </div>
+-                <p className="font-display font-bold text-white text-lg leading-tight mb-2">Book Your Appointment</p>
+-                <p className="text-white/65 text-xs leading-relaxed mb-5">Get your perfect look by booking your appointment now.</p>
+-                <Link to="/book-glam"
+-                  className="inline-flex items-center gap-2 bg-white text-[#5a1f8e] font-semibold text-xs uppercase tracking-[0.18em] px-6 py-3 rounded-full hover:bg-[#f5effe] transition-colors shadow-lg">
+-                  Book Now <Calendar size={13}/>
+-                </Link>
+               </div>
+             </div>
+-
+           </div>
+-        </div>
+ 
+-        {/* Bottom bar */}
+-        <div className="h-px w-full" style={{ background: 'rgba(107,63,160,0.1)' }} />
+-        <div className="max-w-7xl mx-auto px-5 lg:px-12 pt-3 pb-32 md:pb-6 flex flex-col sm:flex-row items-center justify-between gap-1.5">
+-          <p className="text-[#8a6080] text-xs">© {new Date().getFullYear()} {SITE.name}. All rights reserved.</p>
+-          <p className="text-[#8a6080] text-xs relative -top-[10px]">Designed by <span className="font-semibold text-[#c8788a]">Ola</span></p>
++          {/* ── copyright ── */}
++          <div className="mt-6 pt-5 border-t border-[rgba(107,63,160,0.12)] flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-[#9a6080]">
++            <p>© {new Date().getFullYear()} Beccastouch Studio. All rights reserved.</p>
++            <p>Designed with ❤️ by{' '}
++              <a href="https://osamusan.vercel.app" target="_blank" rel="noreferrer"
++                className="font-semibold text-[#6b3fa0] hover:text-[#c8788a] transition-colors underline-offset-2 hover:underline">
++                Ola
++              </a>
++            </p>
++          </div>
+         </div>
+       </div>
+     </footer>
+diff --git a/src/pages/Admin.jsx b/src/pages/Admin.jsx
+index 960b0f9..f9514ae 100644
+--- a/src/pages/Admin.jsx
++++ b/src/pages/Admin.jsx
+@@ -5,10 +5,11 @@ import {
+   LayoutDashboard, Ticket, CalendarDays, Users,
+   Lock, Banknote, Clock3, BadgeCheck, Settings2,
+   ChevronRight, ChevronLeft, CheckCircle2,
+-  ShoppingBag, Tag, Trash2, Mail, CheckCircle, AlertCircle,
++  ShoppingBag, Tag, Trash2, Mail, CheckCircle, AlertCircle, PackageSearch,
+ } from 'lucide-react';
+ import { bookingApi } from '../utils/bookingApi';
+ import AdminShopTab from '../components/AdminShopTab';
++import AdminOrdersTab from '../components/AdminOrdersTab';
+ import AdminPricingTab from '../components/AdminPricingTab';
+ import { useToast } from '../hooks/useToast';
+ import { SITE } from '../utils/siteConfig';
+@@ -20,6 +21,7 @@ const TABS = [
+   { key:'calendar', label:'Calendar',icon:CalendarDays },
+   { key:'users',    label:'Users',   icon:Users },
+   { key:'shop',     label:'Shop',    icon:ShoppingBag },
++  { key:'orders',   label:'Orders',  icon:PackageSearch },
+   { key:'pricing',  label:'Pricing', icon:Tag },
+ ];
+ 
+@@ -1129,6 +1131,7 @@ export default function Admin() {
+ 
+           {/* ── SHOP TAB ── */}
+           {activeTab==='shop' && <AdminShopTab pin={pin}/>}
++          {activeTab==='orders' && <AdminOrdersTab pin={pin}/>}
+ 
+           {/* ── PRICING TAB ── */}
+           {activeTab==='pricing' && <AdminPricingTab pin={pin}/>}
+diff --git a/src/pages/Home.jsx b/src/pages/Home.jsx
+index 2ceb4f1..c60ddec 100644
+--- a/src/pages/Home.jsx
++++ b/src/pages/Home.jsx
+@@ -178,6 +178,51 @@ export default function Home() {
+         </div>
+       </section>
+ 
++      {/* ── TRAINING SERVICES ── */}
++      <section className="py-20 bg-white">
++        <div className="max-w-7xl mx-auto px-5 lg:px-12">
++          <div className="mb-10 max-w-xl">
++            <p className="section-label text-[#b8607a] mb-3">Learn with us</p>
++            <h2 className="font-display text-[26px] md:text-[38px] text-[#3d1f6e]">Professional makeup & studio training</h2>
++            <p className="text-[#6b4a52] text-sm mt-3 leading-relaxed">We don't just glam — we teach. Whether you're starting your beauty career or levelling up an existing skill, our training programmes are hands-on, practical and led by working professionals.</p>
++          </div>
++          <div className="grid md:grid-cols-3 gap-5 mb-8">
++            {[
++              { icon:'🎨', title:'Makeup Artistry', desc:'From basic application to bridal, editorial and special effects. Beginner to advanced, we meet you where you are.' },
++              { icon:'📸', title:'Photography Basics', desc:'Learn how to use studio lighting, backdrops, and camera angles to shoot professional-quality photos.' },
++              { icon:'🎬', title:'Content Creation', desc:'Turn your phone into a production studio. Lighting, framing, editing and growing your social media presence.' },
++            ].map(t => (
++              <div key={t.title} className="rose-card p-7 flex flex-col">
++                <div className="text-3xl mb-4">{t.icon}</div>
++                <h3 className="font-display text-2xl text-[#3d1f6e] mb-3">{t.title}</h3>
++                <p className="text-[#6b4a52] text-sm leading-relaxed flex-1">{t.desc}</p>
++              </div>
++            ))}
++          </div>
++          <div className="rounded-[28px] border border-[rgba(155,114,208,0.25)] p-7 md:p-10"
++            style={{ background:'linear-gradient(135deg,#f8f0ff,#fce4ea)' }}>
++            <div className="flex flex-col md:flex-row md:items-center gap-6 justify-between">
++              <div>
++                <p className="section-label text-[#6b3fa0] mb-2">Enrol today</p>
++                <h3 className="font-display text-2xl md:text-3xl text-[#3d1f6e] mb-2">Ready to learn?</h3>
++                <p className="text-[#6b4a52] text-sm max-w-md leading-relaxed">Training schedules, fees, and slots are available on request. Reach out to us on WhatsApp or call directly to enquire.</p>
++              </div>
++              <div className="flex flex-col sm:flex-row gap-3 shrink-0">
++                <a href={`https://wa.me/${SITE.whatsapp}?text=${encodeURIComponent('Hi, I would like to enquire about your training programmes.')}`}
++                  target="_blank" rel="noreferrer"
++                  className="flex items-center gap-2 px-6 py-3 rounded-full bg-[#25d366] text-white font-semibold text-sm hover:bg-[#1da952] transition-all">
++                  📱 WhatsApp us
++                </a>
++                <a href={`tel:${SITE.phone?.replace(/\s/g,'')}`}
++                  className="flex items-center gap-2 px-6 py-3 rounded-full border border-[rgba(107,63,160,0.3)] text-[#3d1f6e] font-semibold text-sm hover:bg-white/50 transition-all">
++                  📞 Call us
++                </a>
++              </div>
++            </div>
++          </div>
++        </div>
++      </section>
++
+       {/* ── PWA + VIBE ── */}
+       <section className="py-20 bg-blush">
+         <div className="max-w-7xl mx-auto px-5 lg:px-12 space-y-6">
+diff --git a/src/pages/Shop.jsx b/src/pages/Shop.jsx
+index cead371..d17746b 100644
+--- a/src/pages/Shop.jsx
++++ b/src/pages/Shop.jsx
+@@ -1,194 +1,417 @@
+-import { useEffect, useState, useMemo } from 'react';
+-import { ShoppingBag, Search, Filter, MessageCircle, X, ChevronLeft, ChevronRight } from 'lucide-react';
++import { useEffect, useState, useMemo, useCallback } from 'react';
++import { ShoppingBag, Search, MessageCircle, X, ChevronLeft, ChevronRight, ShoppingCart, Trash2, Plus, Minus, Send } from 'lucide-react';
+ import { bookingApi } from '../utils/bookingApi';
+ import { SITE } from '../utils/siteConfig';
++import { useToast } from '../hooks/useToast';
+ 
+ const CATS = ['All', 'Makeup', 'Skincare', 'Hair', 'Tools & Accessories', 'Bundles', 'Other'];
++const CART_KEY = 'beccastouch_cart_v1';
+ 
+-function ProductCard({ product }) {
+-  const [imgIdx, setImgIdx] = useState(0);
+-  const images = (() => {
+-    const arr = Array.isArray(product.images) && product.images.length > 0
+-      ? product.images
+-      : product.image_url ? [product.image_url] : [];
+-    return arr;
+-  })();
++/* ── Cart helpers (localStorage-based session, no login needed) ── */
++function loadCart() {
++  try { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); } catch { return []; }
++}
++function saveCart(items) {
++  localStorage.setItem(CART_KEY, JSON.stringify(items));
++}
++
++/* ── Image carousel ── */
++function ImageCarousel({ images, name, className = '' }) {
++  const [idx, setIdx] = useState(0);
++  const imgs = Array.isArray(images) && images.length ? images : [];
++  if (!imgs.length) return (
++    <div className={`aspect-square w-full bg-gradient-to-br from-[#fce4ea] to-[#f5e2f8] flex items-center justify-center ${className}`}>
++      <ShoppingBag size={32} className="text-[#c8788a]/40"/>
++    </div>
++  );
++  return (
++    <div className={`relative aspect-square w-full overflow-hidden bg-[#fdf0f4] ${className}`}>
++      <img src={imgs[idx]} alt={name} className="w-full h-full object-cover transition-opacity duration-300"/>
++      {imgs.length > 1 && <>
++        <button type="button" onClick={e=>{e.stopPropagation();setIdx(i=>(i-1+imgs.length)%imgs.length);}}
++          className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-white/85 flex items-center justify-center shadow-sm">
++          <ChevronLeft size={13}/>
++        </button>
++        <button type="button" onClick={e=>{e.stopPropagation();setIdx(i=>(i+1)%imgs.length);}}
++          className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-white/85 flex items-center justify-center shadow-sm">
++          <ChevronRight size={13}/>
++        </button>
++        <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
++          {imgs.map((_,i)=>(
++            <button key={i} type="button" onClick={e=>{e.stopPropagation();setIdx(i);}} className={`rounded-full transition-all ${i===idx?'bg-[#c8788a] w-3 h-1.5':'bg-white/60 w-1.5 h-1.5'}`}/>
++          ))}
++        </div>
++      </>}
++    </div>
++  );
++}
+ 
+-  const waLink = `https://wa.me/${SITE.whatsapp}?text=${encodeURIComponent(`Hi! I'd like to order: ${product.name} (NGN ${Number(product.price||0).toLocaleString()})`)}`; 
++/* ── Product detail modal ── */
++function ProductModal({ product, cart, onAddToCart, onClose }) {
++  if (!product) return null;
++  const images = Array.isArray(product.images) && product.images.length ? product.images : product.image_url ? [product.image_url] : [];
++  const inCart = cart.some(i => i.id === product.id);
++  const cartItem = cart.find(i => i.id === product.id);
+ 
+   return (
+-    <div className="rounded-[24px] bg-white border border-[#f0e0e8] overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col">
+-      {/* Image carousel */}
+-      <div className="relative aspect-square bg-[#fdf3f6] overflow-hidden">
+-        {images.length > 0 ? (
++    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4" onClick={onClose}>
++      <div className="bg-white w-full sm:max-w-md rounded-t-[28px] sm:rounded-[28px] overflow-hidden max-h-[92vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
++        <div className="relative">
++          <ImageCarousel images={images} name={product.name}/>
++          <button type="button" onClick={onClose} className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center shadow-sm"><X size={14}/></button>
++          {!product.in_stock && <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/60 text-white text-xs font-semibold">Out of stock</div>}
++        </div>
++        <div className="p-5">
++          <div className="flex items-start justify-between gap-3 mb-3">
++            <div>
++              <p className="font-display text-xl text-[#3d1f6e] leading-tight">{product.name}</p>
++              <p className="text-xs text-[#9a7080] mt-0.5">{product.category}</p>
++            </div>
++            <p className="font-bold text-lg text-[#c8788a] shrink-0">₦{Number(product.price||0).toLocaleString()}</p>
++          </div>
++          {product.description && <p className="text-sm text-[#6b4a52] leading-relaxed mb-4">{product.description}</p>}
++          {product.in_stock ? (
++            <button type="button" onClick={() => { onAddToCart(product); onClose(); }}
++              className={`w-full py-3.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 transition-all ${inCart ? 'bg-[#3d1f6e] text-white' : 'bg-[#c8788a] text-white hover:bg-[#d4889a]'}`}>
++              <ShoppingCart size={15}/>
++              {inCart ? `In cart (×${cartItem?.qty || 1}) — add another` : 'Add to cart'}
++            </button>
++          ) : (
++            <div className="w-full py-3.5 rounded-2xl bg-[#f4f1ef] text-[#9a8880] font-semibold text-sm text-center">Currently out of stock</div>
++          )}
++        </div>
++      </div>
++    </div>
++  );
++}
++
++/* ── Cart drawer ── */
++function CartDrawer({ cart, onUpdate, onRemove, onClose, onCheckout }) {
++  const total = cart.reduce((s,i) => s + i.price * i.qty, 0);
++  return (
++    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-end bg-black/40 backdrop-blur-sm" onClick={onClose}>
++      <div className="bg-white w-full sm:max-w-sm h-full sm:h-auto sm:max-h-[90vh] overflow-y-auto rounded-t-[28px] sm:rounded-l-[28px] sm:rounded-tr-none flex flex-col" onClick={e=>e.stopPropagation()}>
++        <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0e0e8]">
++          <p className="font-display text-xl text-[#3d1f6e]">Your cart</p>
++          <button type="button" onClick={onClose} className="w-8 h-8 rounded-full bg-[#fdf0f2] flex items-center justify-center text-[#9a6070]"><X size={14}/></button>
++        </div>
++        {cart.length === 0 ? (
++          <div className="flex-1 flex flex-col items-center justify-center py-12 text-[#9a7080]">
++            <ShoppingCart size={32} className="mb-3 text-[#e8c4cc]"/>
++            <p className="text-sm">Your cart is empty</p>
++          </div>
++        ) : (
+           <>
+-            <img
+-              src={images[imgIdx]}
+-              alt={product.name}
+-              className="w-full h-full object-cover transition-opacity duration-300"
+-            />
+-            {images.length > 1 && (
+-              <>
+-                <button type="button"
+-                  onClick={() => setImgIdx(i => (i - 1 + images.length) % images.length)}
+-                  className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-white/80 backdrop-blur-sm flex items-center justify-center shadow text-[#3d1f6e] hover:bg-white transition-all">
+-                  <ChevronLeft size={14}/>
+-                </button>
+-                <button type="button"
+-                  onClick={() => setImgIdx(i => (i + 1) % images.length)}
+-                  className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-white/80 backdrop-blur-sm flex items-center justify-center shadow text-[#3d1f6e] hover:bg-white transition-all">
+-                  <ChevronRight size={14}/>
+-                </button>
+-                {/* dots */}
+-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
+-                  {images.map((_, i) => (
+-                    <button key={i} type="button" onClick={() => setImgIdx(i)}
+-                      className={`w-1.5 h-1.5 rounded-full transition-all ${i === imgIdx ? 'bg-[#c8788a] w-4' : 'bg-white/70'}`}/>
+-                  ))}
++            <div className="flex-1 px-5 py-4 space-y-3">
++              {cart.map(item => (
++                <div key={item.id} className="flex gap-3 items-center">
++                  {item.image ? (
++                    <img src={item.image} alt={item.name} className="w-14 h-14 rounded-xl object-cover border border-[#f0e0e8] shrink-0"/>
++                  ) : (
++                    <div className="w-14 h-14 rounded-xl bg-[#fdf0f2] flex items-center justify-center shrink-0"><ShoppingBag size={16} className="text-[#c8788a]/40"/></div>
++                  )}
++                  <div className="flex-1 min-w-0">
++                    <p className="text-sm font-semibold text-[#3d1f6e] truncate">{item.name}</p>
++                    <p className="text-xs text-[#c8788a] font-bold">₦{Number(item.price||0).toLocaleString()}</p>
++                  </div>
++                  <div className="flex items-center gap-1.5 shrink-0">
++                    <button type="button" onClick={() => onUpdate(item.id, item.qty - 1)} className="w-6 h-6 rounded-full border border-[#eecdd4] flex items-center justify-center text-[#9a7080]"><Minus size={10}/></button>
++                    <span className="text-sm font-bold text-[#3d1f6e] w-5 text-center">{item.qty}</span>
++                    <button type="button" onClick={() => onUpdate(item.id, item.qty + 1)} className="w-6 h-6 rounded-full border border-[#eecdd4] flex items-center justify-center text-[#9a7080]"><Plus size={10}/></button>
++                    <button type="button" onClick={() => onRemove(item.id)} className="w-6 h-6 rounded-full bg-[#fff0f0] border border-[#f0c8c8] flex items-center justify-center text-[#b05860] ml-1"><Trash2 size={10}/></button>
++                  </div>
+                 </div>
+-              </>
+-            )}
++              ))}
++            </div>
++            <div className="px-5 py-4 border-t border-[#f0e0e8] space-y-3">
++              <div className="flex items-center justify-between">
++                <p className="font-semibold text-[#3d1f6e]">Total</p>
++                <p className="font-bold text-xl text-[#c8788a]">₦{total.toLocaleString()}</p>
++              </div>
++              <button type="button" onClick={onCheckout}
++                className="w-full py-3.5 rounded-2xl bg-[#3d1f6e] text-white font-semibold text-sm flex items-center justify-center gap-2 hover:bg-[#5a3a8a] transition-all">
++                <ShoppingCart size={15}/> Proceed to checkout
++              </button>
++            </div>
+           </>
+-        ) : (
+-          <div className="w-full h-full flex items-center justify-center">
+-            <ShoppingBag size={40} className="text-[#e0c0cc]"/>
+-          </div>
+-        )}
+-        {!product.in_stock && (
+-          <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] flex items-center justify-center">
+-            <span className="text-xs font-bold text-[#9a7080] uppercase tracking-widest bg-white px-3 py-1.5 rounded-full border border-[#eecdd4]">Out of stock</span>
+-          </div>
+         )}
+-        <span className="absolute top-3 left-3 text-[9px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full bg-white/90 text-[#7a5460]">{product.category}</span>
+       </div>
++    </div>
++  );
++}
+ 
+-      {/* Info */}
+-      <div className="p-4 flex flex-col flex-1">
+-        <p className="font-semibold text-[#3d1f6e] text-sm leading-snug mb-1">{product.name}</p>
+-        {product.description && (
+-          <p className="text-xs text-[#9a7080] leading-relaxed mb-2 line-clamp-2">{product.description}</p>
+-        )}
+-        <div className="mt-auto pt-2 flex items-center justify-between gap-2">
+-          <p className="font-bold text-[#c8788a] text-base">{SITE.currency} {Number(product.price||0).toLocaleString()}</p>
+-          {product.whatsapp_order && product.in_stock && (
+-            <a href={waLink} target="_blank" rel="noreferrer"
+-              className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-[#25d366] text-white text-xs font-semibold hover:bg-[#20bd5a] transition-colors shadow-sm">
+-              <MessageCircle size={12}/> Order
+-            </a>
+-          )}
++/* ── Checkout form ── */
++function CheckoutModal({ cart, onClose, onDone }) {
++  const { showToast } = useToast();
++  const [form, setForm] = useState({ name:'', phone:'', email:'', delivery:'pickup', notes:'' });
++  const [submitting, setSubmitting] = useState(false);
++  const set = (k,v) => setForm(p=>({...p,[k]:v}));
++  const total = cart.reduce((s,i) => s + i.price * i.qty, 0);
++
++  const itemsSummary = cart.map(i => `• ${i.name} ×${i.qty} = ₦${(i.price*i.qty).toLocaleString()}`).join('\n');
++  const fullSummary = `*SHOP ORDER — Beccastouch Studio*\n\n${itemsSummary}\n\n*Total: ₦${total.toLocaleString()}*\n\nName: ${form.name}\nPhone: ${form.phone}\nDelivery: ${form.delivery === 'home' ? 'Home Delivery' : 'Self Pickup'}${form.notes ? '\nNote: ' + form.notes : ''}`;
++
++  async function submit(e) {
++    e.preventDefault();
++    if (!form.name.trim() || !form.phone.trim()) return showToast('Name and phone are required.','error');
++    setSubmitting(true);
++    try {
++      // Save order to backend
++      await bookingApi.saveShopOrder({
++        name: form.name, phone: form.phone, email: form.email,
++        delivery_type: form.delivery, notes: form.notes,
++        items: cart.map(i => ({ id:i.id, name:i.name, qty:i.qty, price:i.price })),
++        total_amount: total,
++      });
++      // Open WhatsApp with order summary
++      const waMsg = encodeURIComponent(fullSummary);
++      window.open(`https://wa.me/${SITE.whatsapp}?text=${waMsg}`, '_blank');
++      onDone();
++    } catch(e) { showToast(e.message, 'error'); }
++    finally { setSubmitting(false); }
++  }
++
++  return (
++    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4" onClick={onClose}>
++      <div className="bg-white w-full sm:max-w-md rounded-t-[28px] sm:rounded-[28px] overflow-hidden max-h-[95vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
++        <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0e0e8]">
++          <p className="font-display text-xl text-[#3d1f6e]">Checkout</p>
++          <button type="button" onClick={onClose} className="w-8 h-8 rounded-full bg-[#fdf0f2] flex items-center justify-center text-[#9a6070]"><X size={14}/></button>
+         </div>
++        <form onSubmit={submit} className="p-5 space-y-4">
++          {/* Order summary */}
++          <div className="rounded-2xl border border-[rgba(61,107,223,0.18)] bg-[#fdf8f5] p-4 space-y-1">
++            <p className="text-[10px] font-bold text-[#3d1f6e] uppercase tracking-[0.18em] mb-2">Order summary</p>
++            {cart.map(i=>(
++              <div key={i.id} className="flex items-center justify-between text-xs">
++                <span className="text-[#5a3a42]">{i.name} ×{i.qty}</span>
++                <span className="font-semibold text-[#3d1f6e]">₦{(i.price*i.qty).toLocaleString()}</span>
++              </div>
++            ))}
++            <div className="flex items-center justify-between text-sm font-bold text-[#c8788a] pt-2 border-t border-[#eecdd4] mt-2">
++              <span>Total</span><span>₦{total.toLocaleString()}</span>
++            </div>
++          </div>
++
++          <div>
++            <label className="label-text">Full name *</label>
++            <input value={form.name} onChange={e=>set('name',e.target.value)} required className="input-field" placeholder="Your full name" style={{background:'#fff',border:'1px solid rgba(61,107,223,0.18)'}}/>
++          </div>
++          <div>
++            <label className="label-text">Phone number *</label>
++            <input value={form.phone} onChange={e=>set('phone',e.target.value)} required className="input-field" placeholder="08000000000" style={{background:'#fff',border:'1px solid rgba(61,107,223,0.18)'}}/>
++          </div>
++          <div>
++            <label className="label-text">Email (optional)</label>
++            <input type="email" value={form.email} onChange={e=>set('email',e.target.value)} className="input-field" placeholder="you@email.com" style={{background:'#fff',border:'1px solid rgba(61,107,223,0.18)'}}/>
++          </div>
++
++          {/* Delivery type */}
++          <div>
++            <p className="label-text mb-2">Delivery option</p>
++            <div className="grid grid-cols-2 gap-3">
++              {[
++                { k:'pickup', t:'Self Pickup', d:'Collect at our studio in Bodija' },
++                { k:'home',   t:'Home Delivery', d:'We deliver to your address' },
++              ].map(({ k, t, d }) => (
++                <button key={k} type="button" onClick={() => set('delivery', k)}
++                  className={`rounded-2xl border p-3 text-left transition-all ${form.delivery===k?'border-[#c8788a] bg-[linear-gradient(135deg,#fce4ea,#f8d8e2)] shadow-sm':'border-[#eecdd4] bg-white hover:border-[#d9a0b0]'}`}>
++                  <p className="font-semibold text-sm text-[#3d1f6e]">{t}</p>
++                  <p className="text-xs text-[#9a7080] mt-0.5">{d}</p>
++                </button>
++              ))}
++            </div>
++          </div>
++
++          <div>
++            <label className="label-text">Additional notes</label>
++            <textarea value={form.notes} onChange={e=>set('notes',e.target.value)} rows={2} className="input-field resize-none" placeholder="Any delivery instructions or requests…" style={{background:'#fff',border:'1px solid rgba(61,107,223,0.18)'}}/>
++          </div>
++
++          <div className="rounded-xl bg-[#e8f8ea] border border-[#a8e0b8] p-3">
++            <p className="text-xs text-[#2a6a3a] font-semibold">📱 Continue on WhatsApp</p>
++            <p className="text-xs text-[#3a7a4a] mt-0.5">After clicking below, WhatsApp will open with your full order details pre-filled. Just hit send!</p>
++          </div>
++
++          <button type="submit" disabled={submitting}
++            className="w-full py-3.5 rounded-2xl bg-[#25d366] text-white font-semibold text-sm flex items-center justify-center gap-2 hover:bg-[#1da952] transition-all disabled:opacity-60">
++            <MessageCircle size={16}/> {submitting ? 'Processing…' : 'Send order on WhatsApp'}
++          </button>
++        </form>
+       </div>
+     </div>
+   );
+ }
+ 
++/* ── Main shop page ── */
+ export default function Shop() {
++  const { showToast } = useToast();
+   const [products, setProducts] = useState([]);
+   const [loading, setLoading] = useState(true);
+-  const [activeCategory, setActiveCategory] = useState('All');
+   const [search, setSearch] = useState('');
+-  const [showFilter, setShowFilter] = useState(false);
++  const [cat, setCat] = useState('All');
++  const [selected, setSelected] = useState(null);
++  const [cart, setCart] = useState(loadCart);
++  const [cartOpen, setCartOpen] = useState(false);
++  const [checkoutOpen, setCheckoutOpen] = useState(false);
++
++  // Persist cart
++  useEffect(() => { saveCart(cart); }, [cart]);
+ 
+   useEffect(() => {
+-    (async () => {
+-      try {
+-        const data = await bookingApi.getPublicProducts();
+-        setProducts((data.products || []).filter(p => !p.is_archived));
+-      } catch {
+-        setProducts([]);
+-      } finally {
+-        setLoading(false);
+-      }
+-    })();
++    const API = 'https://beccastouchstudio-api.amusanolamide74.workers.dev';
++    fetch(API, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'getPublicProducts' }) })
++      .then(r => r.json())
++      .then(d => { if (d.products) setProducts(d.products); })
++      .catch(() => {})
++      .finally(() => setLoading(false));
++  }, []);
++
++  const addToCart = useCallback((product) => {
++    setCart(prev => {
++      const ex = prev.find(i => i.id === product.id);
++      const imgs = Array.isArray(product.images) && product.images.length ? product.images : product.image_url ? [product.image_url] : [];
++      if (ex) return prev.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i);
++      return [...prev, { id: product.id, name: product.name, price: Number(product.price||0), qty: 1, image: imgs[0] || '' }];
++    });
++    showToast(`${product.name} added to cart!`, 'success');
+   }, []);
+ 
++  const updateQty = (id, qty) => {
++    if (qty < 1) return removeFromCart(id);
++    setCart(prev => prev.map(i => i.id === id ? { ...i, qty } : i));
++  };
++  const removeFromCart = (id) => setCart(prev => prev.filter(i => i.id !== id));
++
+   const filtered = useMemo(() => {
+-    let list = products.filter(p => !p.is_archived);
+-    if (activeCategory !== 'All') list = list.filter(p => p.category === activeCategory);
+-    if (search.trim()) {
+-      const q = search.toLowerCase();
+-      list = list.filter(p => p.name?.toLowerCase().includes(q) || p.description?.toLowerCase().includes(q) || p.category?.toLowerCase().includes(q));
+-    }
+-    return list;
+-  }, [products, activeCategory, search]);
+-
+-  const availableCats = useMemo(() => {
+-    const used = new Set(products.filter(p => !p.is_archived).map(p => p.category));
+-    return CATS.filter(c => c === 'All' || used.has(c));
++    return products
++      .filter(p => !p.is_archived)
++      .filter(p => cat === 'All' || p.category === cat)
++      .filter(p => !search || [p.name, p.description, p.category].some(v => String(v||'').toLowerCase().includes(search.toLowerCase())));
++  }, [products, cat, search]);
++
++  const cats = useMemo(() => {
++    const used = new Set(products.filter(p=>!p.is_archived).map(p=>p.category).filter(Boolean));
++    return CATS.filter(c => c==='All' || used.has(c));
+   }, [products]);
+ 
++  const cartCount = cart.reduce((s,i) => s + i.qty, 0);
++
+   return (
+     <div className="min-h-screen bg-[#fdf8f5] pt-24 pb-28 md:pb-16">
+-      <div className="max-w-6xl mx-auto px-5">
+-
+-        {/* Header */}
+-        <div className="mb-8">
+-          <p className="section-label text-[#b8607a] mb-2">Beauty Products</p>
+-          <h1 className="font-display text-4xl md:text-5xl text-[#3d1f6e] mb-3">The beauty shop</h1>
+-          <p className="text-[#7a5460] text-sm max-w-xl">Professional beauty products hand-picked by the Beccastouch team. Order directly via WhatsApp for fast delivery.</p>
+-        </div>
++      {selected && <ProductModal product={selected} cart={cart} onAddToCart={addToCart} onClose={()=>setSelected(null)}/>}
++      {cartOpen && <CartDrawer cart={cart} onUpdate={updateQty} onRemove={removeFromCart} onClose={()=>setCartOpen(false)} onCheckout={()=>{setCartOpen(false);setCheckoutOpen(true);}}/>}
++      {checkoutOpen && <CheckoutModal cart={cart} onClose={()=>setCheckoutOpen(false)} onDone={()=>{ setCart([]); setCheckoutOpen(false); showToast('Order sent! WhatsApp should have opened.','success'); }}/>}
+ 
+-        {/* Search + Filter bar */}
+-        <div className="flex gap-3 mb-5">
+-          <div className="relative flex-1">
+-            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#b08a90]"/>
+-            <input
+-              value={search}
+-              onChange={e => setSearch(e.target.value)}
+-              placeholder="Search products…"
+-              className="input-field pl-9 w-full"
+-            />
+-            {search && (
+-              <button type="button" onClick={() => setSearch('')}
+-                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#b08a90] hover:text-[#7a5460]">
+-                <X size={14}/>
+-              </button>
+-            )}
++      <div className="max-w-6xl mx-auto px-5">
++        {/* Header with cart button */}
++        <div className="flex items-start justify-between gap-4 mb-8">
++          <div>
++            <p className="section-label text-[#b8607a] mb-2">Products</p>
++            <h1 className="font-display text-4xl md:text-5xl text-[#3d1f6e] mb-3">Beauty shop</h1>
++            <p className="text-[#7a5460] text-sm max-w-xl">Premium beauty products hand-picked by the Beccastouch team. Add to cart and order via WhatsApp.</p>
+           </div>
+-          <button type="button" onClick={() => setShowFilter(v => !v)}
+-            className={`flex items-center gap-2 px-4 py-2.5 rounded-[14px] border text-sm font-semibold transition-all ${showFilter ? 'bg-[#c8788a] text-white border-transparent' : 'bg-white border-[#eecdd4] text-[#7a5460]'}`}>
+-            <Filter size={14}/> Filter
++          {/* Cart button — only shown on shop page */}
++          <button type="button" onClick={() => setCartOpen(true)}
++            className="relative shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-[#eecdd4] bg-white text-[#3d1f6e] hover:border-[#c8788a] transition-all shadow-sm mt-2">
++            <ShoppingCart size={18}/>
++            <span className="text-sm font-semibold hidden sm:inline">Cart</span>
++            {cartCount > 0 && (
++              <span className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-[#c8788a] text-white text-[10px] font-bold flex items-center justify-center">
++                {cartCount > 9 ? '9+' : cartCount}
++              </span>
++            )}
+           </button>
+         </div>
+ 
+-        {/* Category filter chips */}
+-        {showFilter && (
+-          <div className="flex flex-wrap gap-2 mb-5 p-4 rounded-2xl bg-white border border-[#f0e0e8]">
+-            {availableCats.map(cat => (
+-              <button key={cat} type="button" onClick={() => setActiveCategory(cat)}
+-                className={`px-4 py-2 rounded-full text-xs font-semibold border transition-all ${activeCategory === cat ? 'bg-[#c8788a] text-white border-transparent shadow-sm' : 'bg-white border-[#eecdd4] text-[#7a5460] hover:border-[#c8788a]'}`}>
+-                {cat}
++        {/* Search + Filter */}
++        <div className="mb-6 space-y-3">
++          <div className="relative">
++            <Search size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#b08a90]"/>
++            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search products…"
++              className="w-full pl-10 pr-4 py-3 rounded-2xl text-sm outline-none transition-all"
++              style={{background:'#ffffff',border:'1px solid rgba(61,107,223,0.18)'}}/>
++          </div>
++          <div className="flex gap-2 overflow-x-auto pb-1">
++            {cats.map(c => (
++              <button key={c} type="button" onClick={() => setCat(c)}
++                className={`shrink-0 px-4 py-2 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${cat===c?'bg-[#3d1f6e] text-white shadow-sm':'bg-white border border-[#eecdd4] text-[#7a5460] hover:border-[#d9a0b0]'}`}>
++                {c}
+               </button>
+             ))}
+           </div>
+-        )}
++        </div>
+ 
+-        {/* Product grid */}
++        {/* Grid */}
+         {loading ? (
+           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+-            {[...Array(8)].map((_, i) => (
+-              <div key={i} className="rounded-[24px] bg-[#fdf0f2] border border-[#f0e0e8] aspect-square animate-pulse"/>
++            {[...Array(8)].map((_,i) => (
++              <div key={i} className="rounded-[22px] bg-white border border-[#eecdd4] overflow-hidden animate-pulse">
++                <div className="aspect-square bg-[#f5e8ec]"/>
++                <div className="p-3 space-y-2"><div className="h-3 bg-[#f0e0e4] rounded-full w-3/4"/><div className="h-3 bg-[#f0e0e4] rounded-full w-1/2"/></div>
++              </div>
+             ))}
+           </div>
+         ) : filtered.length === 0 ? (
+-          <div className="rounded-[24px] border border-dashed border-[#eecdd4] bg-white p-14 text-center">
+-            <ShoppingBag size={40} className="text-[#e0c0cc] mx-auto mb-4"/>
++          <div className="rose-card p-12 text-center">
++            <ShoppingBag size={40} className="mx-auto text-[#c8788a]/40 mb-4"/>
+             <p className="font-display text-2xl text-[#3d1f6e] mb-2">
+-              {products.length === 0 ? 'Shop coming soon' : 'No products found'}
++              {products.filter(p=>!p.is_archived).length === 0 ? 'Shop coming soon' : 'No products found'}
+             </p>
+-            <p className="text-[#9a7080] text-sm max-w-sm mx-auto">
+-              {products.length === 0
+-                ? 'Products will appear here once they\'ve been added. Check back soon!'
+-                : 'Try a different search term or category.'}
++            <p className="text-sm text-[#9a7080]">
++              {products.filter(p=>!p.is_archived).length === 0 ? 'Our product catalog is being prepared. Check back soon!' : 'Try adjusting your search or filter.'}
+             </p>
+-            {search && <button type="button" onClick={() => { setSearch(''); setActiveCategory('All'); }} className="btn-outline-dark mt-4 text-xs">Clear filters</button>}
+           </div>
+         ) : (
+           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+-            {filtered.map(p => <ProductCard key={p.id} product={p}/>)}
++            {filtered.map(p => {
++              const imgs = Array.isArray(p.images) && p.images.length ? p.images : p.image_url ? [p.image_url] : [];
++              const inCart = cart.some(i => i.id === p.id);
++              return (
++                <div key={p.id} className="rounded-[22px] bg-white border border-[#eecdd4] overflow-hidden hover:shadow-lg hover:border-[#d9a0b0] transition-all flex flex-col">
++                  <button type="button" onClick={() => setSelected(p)} className="flex-1 text-left">
++                    <div className="relative">
++                      <ImageCarousel images={imgs} name={p.name}/>
++                      {!p.in_stock && (
++                        <div className="absolute inset-0 bg-white/60 flex items-center justify-center">
++                          <span className="px-3 py-1 rounded-full bg-[#3d1f6e]/80 text-white text-[10px] font-bold uppercase tracking-wider">Out of stock</span>
++                        </div>
++                      )}
++                      {inCart && (
++                        <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#3d1f6e] flex items-center justify-center shadow-sm">
++                          <ShoppingCart size={11} className="text-white"/>
++                        </div>
++                      )}
++                    </div>
++                    <div className="p-3 pb-2">
++                      <p className="font-semibold text-sm text-[#3d1f6e] leading-tight line-clamp-2 mb-1">{p.name}</p>
++                      <p className="text-xs text-[#9a7080] mb-1">{p.category}</p>
++                      <p className="font-bold text-sm text-[#c8788a]">₦{Number(p.price||0).toLocaleString()}</p>
++                    </div>
++                  </button>
++                  {p.in_stock && (
++                    <div className="px-3 pb-3">
++                      <button type="button" onClick={() => addToCart(p)}
++                        className={`w-full py-2 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${inCart?'bg-[#f0f4ff] text-[#3d1f6e] border border-[#c0c8f0]':'bg-[#3d1f6e] text-white hover:bg-[#5a3a8a]'}`}>
++                        <Plus size={11}/> {inCart ? 'Add more' : 'Add to cart'}
++                      </button>
++                    </div>
++                  )}
++                </div>
++              );
++            })}
+           </div>
+         )}
+       </div>
++
++      {/* Floating cart button (mobile) */}
++      {cartCount > 0 && (
++        <button type="button" onClick={() => setCartOpen(true)}
++          className="fixed bottom-24 right-4 z-30 w-14 h-14 rounded-full bg-[#3d1f6e] text-white flex items-center justify-center shadow-lg hover:bg-[#5a3a8a] transition-all md:hidden">
++          <ShoppingCart size={20}/>
++          <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-[#c8788a] text-white text-[10px] font-bold flex items-center justify-center">{cartCount}</span>
++        </button>
++      )}
+     </div>
+   );
+ }
+diff --git a/src/utils/bookingApi.js b/src/utils/bookingApi.js
+index 0138b1f..7278d1d 100644
+--- a/src/utils/bookingApi.js
++++ b/src/utils/bookingApi.js
+@@ -25,6 +25,11 @@ export const bookingApi = {
+   saveAdminProfile:    (pin, name)                         => request({ action:'saveAdminProfile', pin, name }),
+   getAdminProfile:     ()                                  => request({ action:'getAdminProfile' }),
+   getPublicProducts:   ()                                  => request({ action:'getPublicProducts' }),
++  sendReminder:        (bookingId)                          => request({ action:'sendReminder', bookingId }),
++  saveShopOrder:       (order)                              => request({ action:'saveShopOrder', order }),
++  adminGetShopOrders:  (pin)                                => request({ action:'adminGetShopOrders', pin }),
++  adminUpdateShopOrder:(pin, orderId, status, notes)        => request({ action:'adminUpdateShopOrder', pin, orderId, status, notes }),
++  adminDeleteShopOrder:(pin, orderId)                       => request({ action:'adminDeleteShopOrder', pin, orderId }),
+   // Email (SMTP App Password) setup
+   getSmtpStatus:       (pin)                               => request({ action:'getSmtpStatus', pin }),
+   saveSmtpConfig:      (pin, smtpUser, smtpPass)           => request({ action:'saveSmtpConfig', pin, smtpUser, smtpPass }),
+diff --git a/src/utils/siteConfig.js b/src/utils/siteConfig.js
+index 7580b87..f33170c 100644
+--- a/src/utils/siteConfig.js
++++ b/src/utils/siteConfig.js
+@@ -1,10 +1,11 @@
+ export const SITE = {
+   name: 'Beccastouch Studio',
+-  location: 'Bodija, Ibadan, Oyo State',
++  location: 'Total Filling Station, Oju-Irin Bodija, Ibadan, Oyo State',
+   email: 'hello@beccastouchstudio.com',
+-  phone: '+234 805 198 2695',
+-  whatsapp: '2348051982695',
++  phone: '+234 802 327 4274',
++  whatsapp: '2348023274274',
+   instagram: 'https://www.instagram.com/beccastouch?igsh=NG0zNmkxeWFzdjV6',
++  tiktok: 'https://www.tiktok.com/@beccastouch',
+   bankName: 'First Bank',
+   accountName: 'Beccastouch Studio',
+   accountNumber: '0123456789',
+@@ -29,21 +30,18 @@ export const STUDIO_HOURS = [
+   '08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00',
+ ];
+ 
+-// Studio pricing — flat per session slot
+ export const STUDIO_PRICING = {
+   single_half: 10000,
+   single:      15000,
+   group:       25000,
+ };
+ 
+-// Walk-in glam (General / Others)
+ export const GLAM_WALKIN = {
+   makeup:        40000,
+   gele:          10000,
+   'makeup+gele': 45000,
+ };
+ 
+-// Defaults for admin pricing tab
+ export const GLAM_BASE_PRICING = {
+   makeup:        { general: { studio: 40000, home: 50000 }, bridal: { studio: 0, home: 0 } },
+   gele:          { general: { studio: 10000, home: 15000 }, bridal: { studio: 0, home: 0 } },
+-- 
+2.39.5
+

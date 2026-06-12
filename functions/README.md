@@ -1,0 +1,1 @@
+This folder contains the built output assets for the worker "beccastouch-studio" generated at 2026-06-12T08:13:10.839Z.

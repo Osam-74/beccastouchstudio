@@ -1,0 +1,17 @@
+{
+  "name": "Beccastouch Studio",
+  "short_name": "Beccastouch",
+  "description": "Professional photography & glam studio in Ibadan, Nigeria",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A0A0A",
+  "theme_color": "#FF4500",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "categories": ["lifestyle", "business"],
+  "screenshots": []
+}
