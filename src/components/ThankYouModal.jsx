@@ -1,12 +1,14 @@
 import { X, Mail, CheckCircle2, ArrowRight, Copy } from 'lucide-react';
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 export default function ThankYouModal({ booking, onClose }) {
   const [copied, setCopied] = useState(false);
+  const navigate = useNavigate();
   if (!booking) return null;
+  function handleClose() { if (onClose) onClose(); navigate('/'); }
   return (
-    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={handleClose}>
       <div className="absolute inset-0 bg-black/30 backdrop-blur-[3px]" />
       <div
         onClick={e => e.stopPropagation()}
@@ -15,7 +17,7 @@ export default function ThankYouModal({ booking, onClose }) {
         {/* gradient top strip */}
         <div className="h-2 w-full" style={{ background:'linear-gradient(90deg,#c8788a,#e4a0b0,#f2c4ac)' }} />
 
-        <button type="button" onClick={onClose} className="absolute top-5 right-5 w-8 h-8 rounded-full bg-[#fdf0f2] border border-[#eecdd4] flex items-center justify-center text-[#9a6070]"><X size={14}/></button>
+        <button type="button" onClick={handleClose} className="absolute top-5 right-5 w-8 h-8 rounded-full bg-[#fdf0f2] border border-[#eecdd4] flex items-center justify-center text-[#9a6070]"><X size={14}/></button>
 
         <div className="px-6 pt-6 pb-8">
           {/* big thank you */}

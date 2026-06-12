@@ -1,13 +1,12 @@
 /**
  * Beccastouch Studio — Cloudflare Worker Backend
- * Firebase Firestore (REST) + Resend (email)
+ * Firebase Firestore (REST) + Base44 Gmail relay (email)
  *
- * Environment variables (set in Cloudflare Dashboard → Worker → Settings → Variables):
+ * Environment variables (Cloudflare Dashboard → Worker → Settings → Variables):
  *   FIREBASE_PROJECT_ID       e.g. beccastouch-studio
  *   FIREBASE_CLIENT_EMAIL     e.g. firebase-adminsdk-fbsvc@beccastouch-studio.iam.gserviceaccount.com
  *   FIREBASE_PRIVATE_KEY_B64  base64-encoded PEM private key
- *   RESEND_API_KEY            from resend.com
- *   SMTP_USER                 your Gmail address (used as "from" in emails)
+ *   BECCA_MAIL_SECRET         optional override for Base44 relay secret (default: beccastouch_mail_2026)
  *   ADMIN_PIN                 optional override for admin PIN (default: 12345678)
  */
 
@@ -15,9 +14,8 @@ export interface Env {
   FIREBASE_PROJECT_ID: string;
   FIREBASE_CLIENT_EMAIL: string;
   FIREBASE_PRIVATE_KEY_B64: string;
-  RESEND_API_KEY: string;
-  SMTP_USER: string;
   ADMIN_PIN?: string;
+  BECCA_MAIL_SECRET?: string;
 }
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
@@ -231,9 +229,7 @@ class Firestore {
   }
 }
 
-// ── Email via Resend ──────────────────────────────────────────────────────────
-// ── Email sending ─────────────────────────────────────────────────────────────
-// Uses Brevo (sendinblue) HTTP API when configured via admin panel.
+// ── Email via Base44 Gmail relay (sole provider) ─────────────────────────────
 async function sendMail(
   env: Env,
   to: string,
@@ -241,65 +237,26 @@ async function sendMail(
   html: string,
   _fs?: Firestore,
 ): Promise<void> {
-  const fs2 = _fs;
-  const fromEmail = 'beccastouchstudio@gmail.com';
-
-  // ── 1. Try Resend (env-based, always available if key is set) ────────────
-  if (env.RESEND_API_KEY) {
-    const resendFrom = `${STUDIO} <onboarding@resend.dev>`;
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: resendFrom, to, subject, html, reply_to: fromEmail }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      console.error('Resend error:', err, '| to:', to);
-    } else {
-      console.log('Email sent via Resend to:', to);
-    }
-    return;
-  }
-
-  // ── 2. Fallback: Brevo (stored in Firestore by admin) ────────────────────
-  const brevoKey = fs2 ? await fs2.getConfig('brevo_api_key') : null;
-  if (brevoKey) {
-    const brevoFrom = fs2 ? (await fs2.getConfig('smtp_user') || fromEmail) : fromEmail;
-    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-      method: 'POST',
-      headers: { 'api-key': brevoKey as string, 'Content-Type': 'application/json', 'accept': 'application/json' },
-      body: JSON.stringify({ sender: { name: STUDIO, email: brevoFrom }, to: [{ email: to }], subject, htmlContent: html }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      console.error('Brevo error:', err, '| to:', to);
-    } else {
-      console.log('Email sent via Brevo to:', to);
-    }
-    return;
-  }
-  // ── 3. Fallback: Gmail OAuth relay (Base44) ─────────────────────────────
+  console.log('[sendMail] Sending to:', to, '| subject:', subject.slice(0, 60));
+  const GMAIL_RELAY_URL = 'https://api.base44.com/api/apps/6a2b0fd46df8ce19f5241af5/functions/sendGmailEmail';
+  const MAIL_SECRET = (env as any).BECCA_MAIL_SECRET || 'beccastouch_mail_2026';
   try {
-    const GMAIL_RELAY_URL = 'https://api.base44.com/api/apps/6a2b0fd46df8ce19f5241af5/functions/sendGmailEmail';
-    const MAIL_SECRET = (env as any).BECCA_MAIL_SECRET || 'beccastouch_mail_2026';
-    const resRelay = await fetch(GMAIL_RELAY_URL, {
+    const res = await fetch(GMAIL_RELAY_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ secret: MAIL_SECRET, to, subject, html }),
     });
-    if (!resRelay.ok) {
-      const errText = await resRelay.text();
-      console.error('Gmail relay error:', resRelay.status, errText, '| to:', to);
-      throw new Error(`Email send failed (${resRelay.status}): ${errText}`);
+    const text = await res.text();
+    if (!res.ok) {
+      console.error('[sendMail] Relay error', res.status, text.slice(0, 200), '| to:', to);
+    } else {
+      console.log('[sendMail] Sent OK to:', to, '| resp:', text.slice(0, 120));
     }
-    const data = await resRelay.json().catch(() => ({}));
-    console.log('Email sent via Gmail OAuth to:', to, '| messageId:', (data as any).messageId || 'unknown');
-    return;
   } catch (e) {
-    console.error('No email provider available. Email NOT sent to:', to, '| err:', (e as Error).message);
-    return;
+    console.error('[sendMail] Exception sending to:', to, '|', (e as Error).message);
   }
 }
+
 
 // ── PIN helpers ───────────────────────────────────────────────────────────────
 async function getPin(fs: Firestore, env: Env): Promise<string> {
@@ -396,51 +353,6 @@ function toFE(b: Record<string,unknown>): Record<string,unknown> {
   };
 }
 
-// ── Email templates ───────────────────────────────────────────────────────────
-// ── Branded email shell ────────────────────────────────────────────────────────
-function shell(body: string): string {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#fdf5f8;font-family:'Helvetica Neue',Arial,sans-serif;">
-<div style="max-width:600px;margin:0 auto;padding:24px 16px;">
-  <div style="text-align:center;padding:24px 0 16px;">
-    <p style="margin:0;font-size:22px;font-weight:900;color:#3d1f6e;letter-spacing:-0.5px;">Beccastouch <span style="color:#c8788a;font-style:italic;">Studio</span></p>
-    <p style="margin:4px 0 0;font-size:11px;color:#9a7090;text-transform:uppercase;letter-spacing:0.2em;">Beauty · Photography · Content</p>
-  </div>
-  <div style="background:#ffffff;border-radius:20px;border:1px solid rgba(200,120,138,0.15);padding:28px 28px 24px;box-shadow:0 2px 16px rgba(61,31,110,0.06);">
-    ${body}
-  </div>
-  <div style="text-align:center;padding:20px 0 8px;">
-    <p style="margin:0;font-size:11px;color:#c0a0b0;">📍 ${ADDRESS}</p>
-    <p style="margin:4px 0 0;font-size:11px;color:#c0a0b0;">📞 ${PHONE} &nbsp;·&nbsp; 📸 @beccastouch</p>
-    <p style="margin:8px 0 0;font-size:10px;color:#d0b0c0;">© ${new Date().getFullYear()} Beccastouch Studio. All rights reserved.</p>
-  </div>
-</div></body></html>`;
-}
-function dr(label: string, value: string): string {
-  return `<tr><td style="padding:7px 10px;font-size:12px;font-weight:600;color:#6b3fa0;background:#fdf0f6;border-radius:6px 0 0 6px;white-space:nowrap;vertical-align:top;">${label}</td><td style="padding:7px 10px;font-size:12px;color:#3d1f6e;border-bottom:1px solid #f5e0e8;">${value}</td></tr>`;
-}
-function ib(id: string): string {
-  return `<div style="background:linear-gradient(135deg,#f8f0ff,#fce4ea);border-radius:12px;border:1px solid rgba(155,114,208,0.2);padding:12px 16px;margin-bottom:18px;text-align:center;">
-    <p style="margin:0;font-size:10px;font-weight:700;color:#9b72d0;text-transform:uppercase;letter-spacing:0.2em;">Booking ID</p>
-    <p style="margin:4px 0 0;font-size:20px;font-weight:900;color:#3d1f6e;letter-spacing:0.08em;font-family:monospace;">${id}</p>
-    <p style="margin:4px 0 0;font-size:10px;color:#9a7090;">Keep this safe — you can use it to track or resume your booking.</p>
-  </div>`;
-}
-function payHtml(): string {
-  return `<div style="background:#fdf8f0;border-radius:12px;border:1px solid rgba(200,140,60,0.2);padding:14px 18px;margin:16px 0;">
-    <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#8a5020;text-transform:uppercase;letter-spacing:0.15em;">Payment details</p>
-    <table cellpadding="0" cellspacing="0">
-      ${dr('Bank', PAYMENT.bankName)}${dr('Account name', PAYMENT.accountName)}${dr('Account number', PAYMENT.accountNumber)}${dr('Currency', PAYMENT.currency)}
-    </table>
-    <p style="margin:10px 0 0;font-size:11px;color:#9a7060;">Please transfer the exact amount and upload your receipt to complete your booking.</p>
-  </div>`;
-}
-function rulesHtml(): string {
-  return `<div style="margin-top:16px;padding:12px 18px;background:#fdf4f8;border-radius:12px;border:1px solid rgba(200,120,138,0.15);">
-    <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#8a3050;text-transform:uppercase;letter-spacing:0.15em;">Please note</p>
-    <ul style="margin:0;padding-left:16px;">${RULES.map(r => `<li style="font-size:11px;color:#6b4a52;line-height:1.7;margin-bottom:2px;">${r}</li>`).join('')}</ul>
-  </div>`;
-}
 
 // ── Booking type helpers ───────────────────────────────────────────────────────
 function bookingTypeLabel(b: Record<string,unknown>): string {
@@ -464,81 +376,163 @@ function bookingGreeting(b: Record<string,unknown>): string {
   return `Hi <b>${b.client_name}</b>, your glam booking is in and we are already excited to work on you! 💄`;
 }
 
+// ── Shared email helpers (exact Client_template.md / admin_template.md layout) ──
+
+// Outer shell: purple/pink gradient header, white card, lavender footer
+function shell(_h: string, _s: string, body: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+<body style="margin:0;padding:0;background:#f3eef8;font-family:Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f3eef8;padding:32px 16px;">
+<tr><td align="center">
+<table width="100%" style="max-width:560px;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(61,31,110,0.08);">
+<tr><td style="background:linear-gradient(135deg,#3d1f6e,#c8788a);padding:28px 32px;">
+  <p style="margin:0 0 4px;font-size:10px;letter-spacing:0.28em;color:rgba(255,255,255,0.7);text-transform:uppercase;">Beauty · Photography · Style</p>
+  <h1 style="margin:0;font-size:24px;font-weight:800;color:#fff;">Beccastouch Studio</h1>
+  <p style="margin:4px 0 0;font-size:11px;color:rgba(255,255,255,0.75);">📍 ${ADDRESS}</p>
+</td></tr>
+<tr><td style="padding:28px 32px;">
+  ${body}
+</td></tr>
+<tr><td style="background:#f8f4ff;padding:16px 32px;border-top:1px solid #ede8f5;">
+  <p style="margin:0;font-size:11px;color:#9a7ab0;text-align:center;">Beccastouch Studio · ${ADDRESS} · ${PHONE}</p>
+</td></tr>
+</table>
+</td></tr></table></body></html>`;
+}
+
+// Label | value table row
+function dr(label: string, value: string): string {
+  return `<tr>
+    <td style="padding:6px 10px;font-size:12px;color:#9a7080;white-space:nowrap;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;">${label}</td>
+    <td style="padding:6px 10px;font-size:13px;color:#3d1f6e;font-weight:500;">${value}</td>
+  </tr>`;
+}
+
+// Wrap rows in the purple-bordered table
+function dtable(rows: string): string {
+  return `<table style="width:100%;border-collapse:collapse;margin:16px 0;background:#fdf8ff;border-radius:12px;overflow:hidden;border:1px solid #ede0f8;">${rows}</table>`;
+}
+
+// Booking rules block
+function rulesHtml(): string {
+  return `<div style="margin-top:16px;padding:12px 18px;background:#fdf4f8;border-radius:12px;border:1px solid rgba(200,120,138,0.15);">
+    <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#8a3050;text-transform:uppercase;letter-spacing:0.15em;">Please note</p>
+    <ul style="margin:0;padding-left:16px;">${RULES.map(r => `<li style="font-size:11px;color:#6b4a52;line-height:1.7;margin-bottom:2px;">${r}</li>`).join('')}</ul>
+  </div>`;
+}
+
 // ── Email templates ───────────────────────────────────────────────────────────
+
+// CLIENT confirmation — matches Client_template.md
 function tplSubmitted(b: Record<string,unknown>) {
   const isBridalOrSpecial = b.occasion === 'bridal' || b.occasion === 'special';
-  return shell(
-    `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">${isBridalOrSpecial ? (b.occasion === 'bridal' ? 'Bridal request received 💍' : 'Special request received ✨') : 'Booking received ✓'}</h2>
-     <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#c8788a;text-transform:uppercase;letter-spacing:0.1em;">${bookingTypeLabel(b)}</p>
-     <p style="margin:0 0 20px;font-size:13px;color:#7a5090;">${bookingGreeting(b)}</p>
-     ${ib(b.booking_id as string)}
-     <table cellpadding="0" cellspacing="0">
-       ${dr('Service', bookingTypeLabel(b))}
-       ${dr('Summary', b.client_summary as string || smry(b))}
-       ${b.preferred_date ? dr('Date', b.preferred_date as string) : ''}
-       ${b.start_time ? dr('Time', b.start_time as string) : ''}
-       ${b.total_amount ? dr('Amount', (b.currency as string || 'NGN') + ' ' + Number(b.total_amount).toLocaleString()) : ''}
-       ${dr('Status', '⏳ Pending verification')}
-     </table>
-     ${isBridalOrSpecial
-       ? `<div style="background:#f0faf5;border-radius:12px;border:1px solid rgba(40,160,100,0.2);padding:14px 18px;margin:16px 0;"><p style="margin:0;font-size:13px;color:#2a6a45;line-height:1.6;">Our team will reach out to you shortly to discuss your needs and confirm pricing.</p></div>`
-       : payHtml()
-     }
-     ${rulesHtml()}
-     <p style="margin-top:16px;font-size:12px;color:#9a7090;">📍 <b>${ADDRESS}</b> · 📞 ${PHONE}</p>`
-  );
+  const headline = isBridalOrSpecial
+    ? (b.occasion === 'bridal' ? 'Bridal Request Received! 💍' : 'Special Request Received! ✨')
+    : 'Booking Received! 🌸';
+  const subtitle = `Hi ${b.client_name}, we got your booking request`;
+  const statusMsg = isBridalOrSpecial
+    ? `Your ${b.occasion} request has been submitted. Our team will reach out shortly to discuss details and pricing.`
+    : `Your booking has been submitted and is under review. We'll confirm or be in touch with you shortly.`;
+  const typeLabel = bookingTypeLabel(b);
+
+  const rows =
+    dr('Booking ID', b.booking_id as string) +
+    dr('Type', typeLabel) +
+    (b.preferred_date ? dr('Date', b.preferred_date as string) : '') +
+    (b.start_time ? dr('Time', b.start_time as string) : '') +
+    (b.occasion ? dr('Occasion', String(b.occasion)) : '') +
+    (b.total_amount ? dr('Amount', (b.currency as string || 'NGN') + ' ' + Number(b.total_amount).toLocaleString()) : '') +
+    dr('Name', b.client_name as string) +
+    dr('Phone', b.phone as string) +
+    dr('Email', b.email as string);
+
+  const body = `
+    <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">${headline}</h2>
+    <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">${subtitle}</p>
+    <div style="background:#f0faf3;border:1px solid #b8e0c8;border-radius:12px;padding:14px 18px;margin-bottom:20px;">
+      <p style="margin:0;font-size:13px;color:#3d7a53;font-weight:600;">✅ ${statusMsg}</p>
+    </div>
+    ${dtable(rows)}
+    <p style="font-size:12px;color:#9a7090;margin-top:16px;">📍 <b>${ADDRESS}</b></p>
+    <p style="font-size:12px;color:#9a7090;margin-top:8px;">Questions? Reply to this email or WhatsApp us on <b>${PHONE}</b>.</p>`;
+
+  return shell('', '', body);
 }
 
+// ADMIN notification — matches admin_template.md
 function tplAdmin(b: Record<string,unknown>) {
-  const replyEmail = 'beccastouchstudio@gmail.com';
-  return shell(
-    `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">New booking — action needed 🔔</h2>
-     <p style="margin:0 0 16px;font-size:12px;font-weight:700;color:#c8788a;text-transform:uppercase;">${bookingTypeLabel(b)}</p>
-     ${ib(b.booking_id as string)}
-     <table cellpadding="0" cellspacing="0" style="width:100%;">
-       ${dr('Client', b.client_name as string)}
-       ${dr('Email', b.email as string)}
-       ${dr('Phone', b.phone as string)}
-       ${dr('Service', bookingTypeLabel(b))}
-       ${dr('Summary', b.client_summary as string || smry(b))}
-       ${b.preferred_date ? dr('Date', b.preferred_date as string) : ''}
-       ${b.start_time ? dr('Time', b.start_time as string) : ''}
-       ${b.total_amount ? dr('Amount', (b.currency as string || 'NGN') + ' ' + Number(b.total_amount).toLocaleString()) : ''}
-       ${b.notes ? dr('Notes', b.notes as string) : ''}
-     </table>
-     <p style="margin-top:14px;font-size:12px;color:#9a7090;">Reply-to: <a href="mailto:${replyEmail}" style="color:#6b3fa0;">${replyEmail}</a></p>`
-  );
+  const typeLabel = bookingTypeLabel(b);
+  const rows =
+    dr('Booking ID', b.booking_id as string) +
+    dr('Type', typeLabel) +
+    (b.preferred_date ? dr('Date', b.preferred_date as string) : '') +
+    (b.start_time ? dr('Time', b.start_time as string) : '') +
+    (b.occasion ? dr('Occasion', String(b.occasion)) : '') +
+    (b.total_amount ? dr('Amount', (b.currency as string || 'NGN') + ' ' + Number(b.total_amount).toLocaleString()) : '') +
+    dr('Name', b.client_name as string) +
+    dr('Phone', b.phone as string) +
+    dr('Email', b.email as string) +
+    (b.notes ? dr('Notes', b.notes as string) : '') +
+    (b.location_type ? dr('Service type', b.location_type === 'home' ? 'Home service' : 'Studio walk-in') : '') +
+    (b.payment_reference ? dr('Payment ref', b.payment_reference as string) : '');
+
+  const body = `
+    <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">New Booking Received 📋</h2>
+    <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">A new <b>${typeLabel}</b> booking just came in.</p>
+    ${dtable(rows)}
+    <div style="margin-top:20px;text-align:center;">
+      <a href="https://beccastouchstudio.vercel.app/admin" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review in Admin Panel →</a>
+    </div>`;
+
+  return shell('', '', body);
 }
 
+// Status update (confirmed / rejected / other)
 function tplStatusUpdate(b: Record<string,unknown>, note: string) {
   const isConfirmed = (b.status as string) === 'confirmed';
   const isRejected  = (b.status as string) === 'rejected' || (b.status as string) === 'cancelled';
-  const headline = isConfirmed ? 'You are confirmed! 🎉' : isRejected ? 'Update on your booking' : 'Booking status updated';
+  const headline = isConfirmed ? 'Booking Confirmed! 🎉' : isRejected ? 'Update on Your Booking' : 'Booking Status Updated';
   const statusLabel = isConfirmed ? '✅ Confirmed' : isRejected ? '❌ Not confirmed' : String(b.status || '');
   const trackUrl = `https://osam-74.github.io/beccastouchstudio/track?id=${b.booking_id}`;
-  return shell(
-    `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">${headline}</h2>
-     <p style="margin:0 0 16px;font-size:13px;color:#7a5090;">Hi <b>${b.client_name}</b>,</p>
-     ${ib(b.booking_id as string)}
-     <table cellpadding="0" cellspacing="0" style="width:100%;">
-       ${dr('Booking ID', b.booking_id as string)}
-       ${dr('Service', bookingTypeLabel(b))}
-       ${b.preferred_date ? dr('Date', b.preferred_date as string) : ''}
-       ${b.start_time ? dr('Time', b.start_time as string) : ''}
-       ${dr('Status', statusLabel)}
-     </table>
-     ${note ? `<div style="background:#fffbf0;border-radius:12px;border:1px solid #f0e4b8;padding:14px 18px;margin:14px 0;"><p style="margin:0;font-size:13px;color:#6a5020;">${note}</p></div>` : ''}
-     ${isConfirmed ? `
-     <div style="text-align:center;margin:20px 0;">
-       <a href="${trackUrl}" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#6b3fa0);color:#fff;font-size:14px;font-weight:700;padding:14px 28px;border-radius:50px;text-decoration:none;">⬇️ Download Your Ticket</a>
-       <p style="margin:8px 0 0;font-size:11px;color:#9a7090;">Opens your booking page where you can view &amp; download your ticket</p>
-     </div>
-     ${rulesHtml()}
-     <div style="margin-top:16px;padding:12px 18px;background:#f0faf5;border-radius:12px;border:1px solid rgba(40,160,100,0.2);">
-       <p style="margin:0;font-size:12px;color:#2a6a45;line-height:1.7;">📍 <b>${ADDRESS}</b><br>⏰ Please arrive <b>15 minutes early</b> so we can get you settled.<br>📞 Questions? Call us on <b>${PHONE}</b></p>
-     </div>` : ''}
-     ${isRejected ? `<div style="margin-top:16px;padding:12px 18px;background:#fff4f4;border-radius:12px;border:1px solid rgba(168,64,64,0.15);"><p style="margin:0;font-size:13px;color:#7a4040;line-height:1.6;">We are sorry we could not accommodate your booking this time. We would love to find another time that works — feel free to rebook at any time. You can also reach us directly on ${PHONE}.</p></div>` : ''}`
-  );
+  const typeLabel = bookingTypeLabel(b);
+
+  const rows =
+    dr('Booking ID', b.booking_id as string) +
+    dr('Type', typeLabel) +
+    (b.preferred_date ? dr('Date', b.preferred_date as string) : '') +
+    (b.start_time ? dr('Time', b.start_time as string) : '') +
+    dr('Status', statusLabel) +
+    dr('Name', b.client_name as string) +
+    dr('Phone', b.phone as string) +
+    dr('Email', b.email as string);
+
+  const noteHtml = note ? `<div style="background:#fffbf0;border-radius:12px;border:1px solid #f0e4b8;padding:14px 18px;margin:14px 0;"><p style="margin:0;font-size:13px;color:#6a5020;">${note}</p></div>` : '';
+
+  const confirmedExtra = isConfirmed ? `
+    <div style="margin-top:20px;text-align:center;">
+      <a href="${trackUrl}" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;font-size:14px;font-weight:700;padding:14px 28px;border-radius:50px;text-decoration:none;">⬇️ Download Your Ticket</a>
+      <p style="margin:8px 0 0;font-size:11px;color:#9a7090;">Opens your booking page where you can view and download your confirmed ticket</p>
+    </div>
+    ${rulesHtml()}
+    <div style="margin-top:16px;padding:12px 18px;background:#f0faf5;border-radius:12px;border:1px solid rgba(40,160,100,0.2);">
+      <p style="margin:0;font-size:12px;color:#2a6a45;line-height:1.7;">📍 <b>${ADDRESS}</b><br>⏰ Please arrive <b>15 minutes early</b> so we can get you settled.<br>📞 Questions? Call us on <b>${PHONE}</b></p>
+    </div>` : '';
+
+  const rejectedExtra = isRejected ? `
+    <div style="margin-top:16px;padding:12px 18px;background:#fff4f4;border-radius:12px;border:1px solid rgba(168,64,64,0.15);">
+      <p style="margin:0;font-size:13px;color:#7a4040;line-height:1.6;">We are sorry we could not accommodate your booking this time. We would love to find another time — feel free to rebook. You can also reach us on <b>${PHONE}</b>.</p>
+    </div>` : '';
+
+  const body = `
+    <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">${headline}</h2>
+    <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">Hi ${b.client_name}, here is an update on your booking.</p>
+    ${dtable(rows)}
+    ${noteHtml}
+    ${confirmedExtra}
+    ${rejectedExtra}
+    <p style="font-size:12px;color:#9a7090;margin-top:16px;">Questions? Reply to this email or WhatsApp us on <b>${PHONE}</b>.</p>`;
+
+  return shell('', '', body);
 }
 
 async function notifySubmission(fs: Firestore, env: Env, b: Record<string,unknown>): Promise<void> {
@@ -814,48 +808,30 @@ export default {
 
       // ── getSmtpStatus ───────────────────────────────────────────────────────
       if (action === 'getSmtpStatus') {
-        const hasResend = !!env.RESEND_API_KEY;
-        const brevoKey  = await fs.getConfig('brevo_api_key');
-        const brevoEmail = await fs.getConfig('smtp_user') || '';
-        const connected = hasResend || !!brevoKey;
-        const provider  = hasResend ? 'Resend' : (brevoKey ? 'Brevo' : 'none');
-        const email     = hasResend ? 'beccastouchstudio@gmail.com' : brevoEmail;
-        return j({ ok: true, connected, configured: connected, email, provider });
+        return j({ ok: true, connected: true, configured: true, email: 'beccastouchstudio@gmail.com', provider: 'Base44 Gmail' });
       }
 
-      // ── saveSmtpConfig ─────────────────────────────────────────────────────
+      // ── saveSmtpConfig — no-op (email via Base44 relay) ────────────────────
       if (action === 'saveSmtpConfig') {
-        await checkPin(fs, env, body.pin as string);
-        const smtpUser = (body.smtpUser || body.smtp_user || '') as string;
-        const brevoKey = (body.smtpPass || body.brevo_key || body.smtp_pass || '') as string;
-        if (!smtpUser || !brevoKey) return j({ error: 'Gmail address and Brevo API key are required' }, 400);
-        await fs.setConfig('smtp_user', smtpUser);
-        await fs.setConfig('brevo_api_key', brevoKey);
-        return j({ ok: true, email: smtpUser, connected: true, provider: 'Brevo' });
+        return j({ ok: true, connected: true, provider: 'Base44 Gmail', message: 'Email is handled via Base44 Gmail relay — no configuration needed.' });
       }
 
-      // ── disconnectSmtp ─────────────────────────────────────────────────────
+      // ── disconnectSmtp — no-op ────────────────────────────────────────────────
       if (action === 'disconnectSmtp') {
-        await checkPin(fs, env, body.pin as string);
-        await fs.setConfig('smtp_user', '');
-        await fs.setConfig('brevo_api_key', '');
-        return j({ ok: true, connected: false });
+        return j({ ok: true, connected: true, message: 'Email uses Base44 Gmail relay.' });
       }
 
       // ── testEmail ───────────────────────────────────────────────────────────
       if (action === 'testEmail') {
         await checkPin(fs, env, body.pin as string);
-        const brevoKey  = await fs.getConfig('brevo_api_key');
-        const gmailAddr = await fs.getConfig('smtp_user') || env.SMTP_USER || '';
-        const to = (body.to as string) || gmailAddr;
-        if (!to) return j({ error: 'No recipient email configured' }, 400);
-        if (!brevoKey && !env.RESEND_API_KEY) return j({ error: 'No email provider configured. Set up Brevo API key first.' }, 400);
-        await sendMail(env, to, `[${STUDIO}] Test Email ✓`,
-          shell(`<p style="margin:0 0 16px;font-size:15px;color:#3d1f6e;font-weight:700;">Email is working! 🎉</p>
-                 <p style="margin:0;font-size:14px;color:#5a3a42;">This test email was sent from <b>${STUDIO}</b> via Brevo.<br>
-                 Booking confirmations and client notifications will come through this address.</p>`),
-          fs
-        );
+        const to = (body.to as string) || 'beccastouchstudio@gmail.com';
+        const testHtml = shell('', '', `
+          <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">Email is working! 🎉</h2>
+          <p style="margin:0 0 16px;font-size:13px;color:#9a7080;">Hi there, this is a test email from <b>${STUDIO}</b>.</p>
+          <div style="background:#f0faf3;border:1px solid #b8e0c8;border-radius:12px;padding:14px 18px;">
+            <p style="margin:0;font-size:13px;color:#3d7a53;font-weight:600;">✅ Email delivery via Base44 Gmail is working correctly.</p>
+          </div>`);
+        await sendMail(env, to, `[${STUDIO}] Test Email ✓`, testHtml, fs);
         return j({ ok: true, message: 'Test email sent', email: to });
       }
 
@@ -865,8 +841,8 @@ export default {
           project_id: env.FIREBASE_PROJECT_ID || 'MISSING',
           has_b64_key: !!(env.FIREBASE_PRIVATE_KEY_B64),
           b64_key_length: (env.FIREBASE_PRIVATE_KEY_B64 || '').length,
-          resend_configured: !!(env.RESEND_API_KEY),
-          smtp_user: env.SMTP_USER || 'MISSING',
+          email_provider: 'Base44 Gmail relay',
+          email_active: true,
         });
       }
 
@@ -874,18 +850,17 @@ export default {
       if (action === 'sendReminder') {
         const b = await findBooking(fs, body.bookingId as string);
         if (!b || !b.email) return j({ error: 'Booking not found or no email' }, 404);
-        const reminderHtml = shell(
-          `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">See you in 2 hours! ⏰</h2>
-           <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#c8788a;text-transform:uppercase;">${bookingTypeLabel(b)}</p>
-           <p style="margin:0 0 16px;font-size:13px;color:#7a5090;">Hi <b>${b.client_name}</b>! Just a friendly reminder that your session is coming up in 2 hours.</p>
-           ${ib(b.booking_id as string)}
-           <table cellpadding="0" cellspacing="0">
-             ${b.preferred_date ? dr('Date', b.preferred_date as string) : ''}
-             ${b.start_time ? dr('Booked time', b.start_time as string) : ''}
-           </table>
-           <p style="margin-top:16px;font-size:12px;color:#9a7090;">📍 <b>${ADDRESS}</b> · 📞 ${PHONE}</p>
-           <p style="margin-top:8px;font-size:12px;color:#9a7090;">Thank you for choosing ${STUDIO} — we cannot wait to see you! 🌸</p>`
-        );
+        const reminderRows =
+          (b.preferred_date ? dr('Date', b.preferred_date as string) : '') +
+          (b.start_time ? dr('Booked time', b.start_time as string) : '') +
+          dr('Name', b.client_name as string) +
+          dr('Phone', b.phone as string);
+        const reminderBody = `
+          <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">See you in 2 hours! ⏰</h2>
+          <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">Hi <b>${b.client_name}</b>! Just a friendly reminder that your session is coming up in 2 hours.</p>
+          ${dtable(reminderRows)}
+          <p style="font-size:12px;color:#9a7090;margin-top:16px;">📍 <b>${ADDRESS}</b><br>📞 ${PHONE}<br>We cannot wait to see you! 🌸</p>`;
+        const reminderHtml = shell('', '', reminderBody);
         try {
           await sendMail(env, b.email as string, `Reminder: your session is in 2 hours — ${b.booking_id} | ${STUDIO}`, reminderHtml);
           return j({ ok: true });
@@ -909,18 +884,22 @@ export default {
           const itemRows = ((o.items as Array<{name:string;qty:number;price:number}>) || [])
             .map(i => dr(i.name, `x${i.qty} — NGN ${(i.price*i.qty).toLocaleString()}`)).join('');
           try {
-            await sendMail(env, adminEmail, `[${STUDIO}] New shop order — ${orderId}`,
-              shell(`<h2 style="margin:0 0 16px;font-size:20px;font-weight:800;color:#3d1f6e;">New shop order 🛒</h2>
-                <table cellpadding="0" cellspacing="0" style="width:100%;">
-                  ${dr('Order ID', orderId)}${dr('Client', String(o.name))}${dr('Phone', String(o.phone))}
-                  ${o.email ? dr('Email', String(o.email)) : ''}
-                  ${dr('Delivery', o.delivery_type === 'home' ? 'Home Delivery' : 'Self Pickup')}
-                  ${dr('Total', 'NGN ' + Number(o.total_amount).toLocaleString())}
-                </table>
-                <div style="margin-top:16px;padding:14px 18px;background:#f8f4ff;border-radius:12px;border:1px solid #ddd0f5;">
-                  <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#3d1f6e;text-transform:uppercase;">Items ordered</p>
-                  <table cellpadding="0" cellspacing="0">${itemRows}</table>
-                </div>`));
+            const shopRows =
+              dr('Order ID', orderId) +
+              dr('Client', String(o.name)) +
+              dr('Phone', String(o.phone)) +
+              (o.email ? dr('Email', String(o.email)) : '') +
+              dr('Delivery', o.delivery_type === 'home' ? 'Home Delivery' : 'Self Pickup') +
+              dr('Total', 'NGN ' + Number(o.total_amount).toLocaleString()) +
+              itemRows;
+            const shopBody = `
+              <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">New Shop Order 🛒</h2>
+              <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">A new shop order just came in — review below.</p>
+              ${dtable(shopRows)}
+              <div style="margin-top:20px;text-align:center;">
+                <a href="https://beccastouchstudio.vercel.app/admin" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review in Admin Panel →</a>
+              </div>`;
+            await sendMail(env, adminEmail, `[${STUDIO}] New shop order — ${orderId}`, shell('', '', shopBody));
           } catch(e) { console.error('shop order admin email:', e); }
         }
         return j({ ok: true, orderId, order: saved });

@@ -46,7 +46,7 @@ function ImageCarousel({ images, name, className = '' }) {
   );
 }
 
-/* ── Full product detail page ── */
+/* ── Full product detail page — images left, info+price+CTA right ── */
 function ProductDetailPage({ product, cart, onAddToCart, onBack }) {
   const [mainIdx, setMainIdx] = useState(0);
   if (!product) return null;
@@ -65,65 +65,75 @@ function ProductDetailPage({ product, cart, onAddToCart, onBack }) {
         <p className="font-semibold text-[#3d1f6e] text-sm truncate flex-1">{product.name}</p>
       </div>
 
-      <div className="max-w-2xl mx-auto px-4 pt-4 pb-32">
-        {/* Main image */}
-        <div className="relative rounded-[24px] overflow-hidden bg-[#fdf0f4] mb-4 aspect-square w-full">
-          {images.length > 0 ? (
-            <img src={images[mainIdx]} alt={product.name} className="w-full h-full object-cover"/>
-          ) : (
-            <div className="w-full h-full flex items-center justify-center">
-              <ShoppingBag size={48} className="text-[#c8788a]/30"/>
-            </div>
-          )}
-          {!product.in_stock && (
-            <div className="absolute top-4 left-4 px-3 py-1 rounded-full bg-black/60 text-white text-xs font-semibold">Out of stock</div>
-          )}
-        </div>
+      <div className="max-w-4xl mx-auto px-4 pt-5 pb-28">
+        {/* Two-column layout: images left, info right */}
+        <div className="flex flex-col md:flex-row gap-5">
 
-        {/* Thumbnail gallery */}
-        {images.length > 1 && (
-          <div className="flex gap-2 overflow-x-auto pb-2 mb-5">
-            {images.map((src, i) => (
-              <button key={i} type="button" onClick={() => setMainIdx(i)}
-                className={`shrink-0 w-16 h-16 rounded-[12px] overflow-hidden border-2 transition-all ${i === mainIdx ? 'border-[#c8788a]' : 'border-transparent opacity-60 hover:opacity-90'}`}>
-                <img src={src} alt="" className="w-full h-full object-cover"/>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Product info */}
-        <div className="bg-white rounded-[20px] p-5 mb-4">
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <div className="flex-1 min-w-0">
-              <p className="font-display text-2xl text-[#3d1f6e] leading-tight">{product.name}</p>
-              <p className="text-xs text-[#9a7080] mt-1">{product.category}</p>
-            </div>
-            <div className="text-right shrink-0">
-              {hasSale ? (
-                <>
-                  <p className="font-bold text-xl text-[#c8788a]">₦{Number(product.sale_price).toLocaleString()}</p>
-                  <p className="text-sm text-[#9a8080] line-through">₦{Number(product.price).toLocaleString()}</p>
-                </>
+          {/* LEFT — image gallery */}
+          <div className="w-full md:w-[46%] shrink-0">
+            {/* Main image */}
+            <div className="relative rounded-[22px] overflow-hidden bg-[#fdf0f4] aspect-square w-full mb-3">
+              {images.length > 0 ? (
+                <img src={images[mainIdx]} alt={product.name} className="w-full h-full object-cover"/>
               ) : (
-                <p className="font-bold text-xl text-[#c8788a]">₦{Number(product.price||0).toLocaleString()}</p>
+                <div className="w-full h-full flex items-center justify-center">
+                  <ShoppingBag size={48} className="text-[#c8788a]/30"/>
+                </div>
+              )}
+              {!product.in_stock && (
+                <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/60 text-white text-xs font-semibold">Out of stock</div>
+              )}
+            </div>
+            {/* Thumbnail strip */}
+            {images.length > 1 && (
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {images.map((src, i) => (
+                  <button key={i} type="button" onClick={() => setMainIdx(i)}
+                    className={`shrink-0 w-14 h-14 rounded-[10px] overflow-hidden border-2 transition-all ${i === mainIdx ? 'border-[#c8788a]' : 'border-transparent opacity-55 hover:opacity-90'}`}>
+                    <img src={src} alt="" className="w-full h-full object-cover"/>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT — product info, price, add to cart */}
+          <div className="flex-1 flex flex-col gap-4">
+            {/* Name + category */}
+            <div>
+              <p className="text-xs text-[#9a7080] uppercase tracking-[0.18em] font-semibold mb-1">{product.category}</p>
+              <h2 className="font-display text-2xl md:text-3xl text-[#3d1f6e] leading-tight mb-2">{product.name}</h2>
+              {/* Price */}
+              {hasSale ? (
+                <div className="flex items-baseline gap-2">
+                  <p className="font-bold text-2xl text-[#c8788a]">₦{Number(product.sale_price).toLocaleString()}</p>
+                  <p className="text-base text-[#9a8080] line-through">₦{Number(product.price).toLocaleString()}</p>
+                  <span className="text-xs font-bold text-white bg-[#c8788a] px-2 py-0.5 rounded-full">SALE</span>
+                </div>
+              ) : (
+                <p className="font-bold text-2xl text-[#c8788a]">₦{Number(product.price||0).toLocaleString()}</p>
+              )}
+            </div>
+
+            {/* Description */}
+            <div className="bg-white rounded-[18px] border border-[rgba(61,107,223,0.18)] p-4 flex-1">
+              <p className="text-xs uppercase tracking-[0.18em] text-[#9a7080] font-semibold mb-2">Description</p>
+              <ProductDescription text={product.description} />
+            </div>
+
+            {/* Add to cart CTA */}
+            <div className="bg-white rounded-[18px] border border-[rgba(61,107,223,0.18)] p-4">
+              {product.in_stock ? (
+                <button type="button" onClick={() => { onAddToCart(product); onBack(); }}
+                  className={`w-full py-4 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 transition-all ${inCart ? 'bg-[#3d1f6e] text-white' : 'bg-[#c8788a] text-white hover:bg-[#d4889a]'}`}>
+                  <ShoppingCart size={16}/>
+                  {inCart ? `In cart (×${cartItem?.qty || 1}) — add another` : 'Add to cart'}
+                </button>
+              ) : (
+                <div className="w-full py-4 rounded-2xl bg-[#f4f1ef] text-[#9a8880] font-semibold text-sm text-center">Currently out of stock</div>
               )}
             </div>
           </div>
-          <ProductDescription text={product.description} />
-        </div>
-
-        {/* Add to cart */}
-        <div className="bg-white rounded-[20px] p-4">
-          {product.in_stock ? (
-            <button type="button" onClick={() => { onAddToCart(product); onBack(); }}
-              className={`w-full py-4 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 transition-all ${inCart ? 'bg-[#3d1f6e] text-white' : 'bg-[#c8788a] text-white hover:bg-[#d4889a]'}`}>
-              <ShoppingCart size={16}/>
-              {inCart ? `In cart (×${cartItem?.qty || 1}) — add another` : 'Add to cart'}
-            </button>
-          ) : (
-            <div className="w-full py-4 rounded-2xl bg-[#f4f1ef] text-[#9a8880] font-semibold text-sm text-center">Currently out of stock</div>
-          )}
         </div>
       </div>
     </div>
