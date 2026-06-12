@@ -466,6 +466,7 @@ async function sendMail(fs: Firestore, to: string, subject: string, html: string
 const shell = (c: string) => `<!DOCTYPE html><html><head><meta charset="UTF-8"/></head><body style="margin:0;padding:0;background:#f3eef8;font-family:Arial,sans-serif;"><table width="100%" cellpadding="0" cellspacing="0" style="background:#f3eef8;padding:32px 16px;"><tr><td align="center"><table width="100%" style="max-width:560px;background:#fff;border-radius:20px;overflow:hidden;"><tr><td style="background:linear-gradient(135deg,#3d1f6e,#c8788a);padding:28px 32px;"><p style="margin:0 0 4px;font-size:10px;letter-spacing:0.28em;color:rgba(255,255,255,0.7);">BEAUTY · PHOTOGRAPHY · STYLE</p><h1 style="margin:0;font-size:24px;font-weight:800;color:#fff;">${STUDIO}</h1><p style="margin:4px 0 0;font-size:11px;color:rgba(255,255,255,0.75);">📍 ${ADDRESS}</p></td></tr><tr><td style="padding:28px 32px;">${c}</td></tr><tr><td style="background:#f8f4ff;padding:16px 32px;border-top:1px solid #ede8f5;"><p style="margin:0;font-size:11px;color:#9a7ab0;text-align:center;">${STUDIO} · ${ADDRESS}</p></td></tr></table></td></tr></table></body></html>`;
 const ib  = (id: string) => `<div style="background:#f8f4ff;border-radius:12px;border:1.5px solid #ddd0f5;padding:14px 18px;margin-bottom:20px;"><p style="margin:0 0 2px;font-size:10px;text-transform:uppercase;letter-spacing:0.2em;color:#9a7ab0;">Booking ID</p><p style="margin:0;font-family:monospace;font-size:18px;font-weight:700;color:#3d1f6e;">${id}</p></div>`;
 const dr  = (l: string, v: string) => v ? `<tr><td style="padding:4px 0;font-size:12px;color:#9a7ab0;width:130px;">${l}</td><td style="padding:4px 0;font-size:12px;color:#3d1f6e;font-weight:600;">${v}</td></tr>` : '';
+const dr2 = (l: string, v: string) => v ? `<tr><td style="padding:6px 10px;font-size:12px;color:#9a7080;white-space:nowrap;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;">${l}</td><td style="padding:6px 10px;font-size:13px;color:#3d1f6e;font-weight:500;">${v}</td></tr>` : '';
 const payHtml   = () => `<div style="background:#f8f4ff;border-radius:12px;border:1px solid #ddd0f5;padding:16px 18px;margin-top:18px;"><p style="margin:0 0 10px;font-size:11px;font-weight:700;color:#3d1f6e;text-transform:uppercase;letter-spacing:0.1em;">Payment details</p><table cellpadding="0" cellspacing="0">${dr('Bank', PAYMENT.bankName)}${dr('Account name', PAYMENT.accountName)}${dr('Account no.', PAYMENT.accountNumber)}</table></div>`;
 const rulesHtml = () => `<div style="background:#fdf8ff;border-radius:12px;border:1px solid #ede8f5;padding:16px 18px;margin-top:18px;"><p style="margin:0 0 10px;font-size:11px;font-weight:700;color:#3d1f6e;text-transform:uppercase;letter-spacing:0.1em;">Important notes</p>${RULES.map((r, i) => `<p style="margin:0 0 6px;font-size:12px;color:#7a5090;line-height:1.5;"><b style="color:#c8788a;">${i+1}.</b> ${r}</p>`).join('')}</div>`;
 
@@ -526,20 +527,26 @@ function reminderBody(b: Record<string, unknown>): string {
 }
 
 const tplReceived = (b: Record<string, unknown>) => shell(
-  `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">Booking received ✓</h2>
-   <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#c8788a;text-transform:uppercase;letter-spacing:0.1em;">${bookingTypeLabel(b)}</p>
-   <p style="margin:0 0 20px;font-size:13px;color:#7a5090;">${bookingGreeting(b)}</p>
-   ${ib(b.booking_id as string)}
-   <table cellpadding="0" cellspacing="0">
-     ${dr('Service', bookingTypeLabel(b))}
-     ${dr('Summary', b.client_summary as string || '—')}
-     ${b.preferred_date ? dr('Date', b.preferred_date as string) : ''}
-     ${b.start_time ? dr('Time', b.start_time as string) : ''}
-     ${b.total_amount ? dr('Amount', b.currency + ' ' + Number(b.total_amount).toLocaleString()) : ''}
-     ${dr('Status', '⏳ Pending verification')}
+  `<h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">Booking Received! 🌸</h2>
+   <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">Hi ${b.client_name as string || 'there'}, we got your booking request</p>
+   <div style="background:#f0faf3;border:1px solid #b8e0c8;border-radius:12px;padding:14px 18px;margin-bottom:20px;">
+     <p style="margin:0;font-size:13px;color:#3d7a53;font-weight:600;">✅ Your booking has been submitted and is under review. We'll confirm or be in touch with you shortly.</p>
+   </div>
+   <table style="width:100%;border-collapse:collapse;margin:16px 0;background:#fdf8ff;border-radius:12px;overflow:hidden;border:1px solid #ede0f8;">
+     ${dr2('Booking ID', b.booking_id as string)}
+     ${dr2('Type', bookingTypeLabel(b))}
+     ${b.preferred_date ? dr2('Date', b.preferred_date as string) : ''}
+     ${b.start_time ? dr2('Time', b.start_time as string) : ''}
+     ${b.occasion ? dr2('Occasion', b.occasion as string) : ''}
+     ${b.total_amount ? dr2('Amount', (b.currency as string || 'NGN') + ' ' + Number(b.total_amount).toLocaleString()) : ''}
+     ${dr2('Name', b.client_name as string || '')}
+     ${b.phone ? dr2('Phone', b.phone as string) : ''}
+     ${b.email ? dr2('Email', b.email as string) : ''}
+     ${b.notes ? dr2('Notes', b.notes as string) : ''}
    </table>
    ${payHtml()}${rulesHtml()}
-   <p style="margin-top:18px;font-size:12px;color:#9a7090;">📍 <b>${ADDRESS}</b> · 📞 ${PHONE}</p>`
+   <p style="font-size:12px;color:#9a7090;margin-top:16px;">📍 <b>${ADDRESS}</b></p>
+   <p style="font-size:12px;color:#9a7090;margin-top:8px;">Questions? Reply to this email or WhatsApp us on <b>${PHONE}</b>.</p>`
 );
 
 const tplBridal = (b: Record<string, unknown>) => shell(
@@ -553,57 +560,64 @@ const tplBridal = (b: Record<string, unknown>) => shell(
 );
 
 const tplConfirmed = (b: Record<string, unknown>) => shell(
-  `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">You're confirmed! 🎉</h2>
-   <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#c8788a;text-transform:uppercase;letter-spacing:0.1em;">${bookingTypeLabel(b)}</p>
-   <p style="margin:0 0 20px;font-size:13px;color:#7a5090;">${confirmGreeting(b)}</p>
-   ${ib(b.booking_id as string)}
-   <div style="background:#f0faf5;border-radius:12px;padding:16px 18px;margin-bottom:16px;">
-     <table cellpadding="0" cellspacing="0">
-       ${dr('Name', b.client_name as string)}
-       ${b.preferred_date ? dr('Date', b.preferred_date as string) : ''}
-       ${b.start_time ? dr('Time', b.start_time as string) : ''}
-       ${b.total_amount ? dr('Amount', b.currency + ' ' + Number(b.total_amount).toLocaleString()) : ''}
-       ${dr('Status', '✅ Confirmed')}
-     </table>
+  `<h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">Booking Confirmed! 🎉</h2>
+   <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">${confirmGreeting(b)}</p>
+   <div style="background:#f0faf3;border:1px solid #b8e0c8;border-radius:12px;padding:14px 18px;margin-bottom:20px;">
+     <p style="margin:0;font-size:14px;color:#3d7a53;font-weight:700;">✅ Confirmed — ${b.booking_id as string}</p>
    </div>
-   ${b.admin_note ? '<div style="background:#fffbf0;border-radius:12px;border:1px solid #f0e4b8;padding:14px 18px;margin-bottom:14px;"><p style="margin:0;font-size:13px;color:#6a5020;">' + b.admin_note + '</p></div>' : ''}
-   <div style="background:linear-gradient(135deg,#3d1f6e,#6b3fa0);border-radius:14px;padding:18px 20px;margin:16px 0;text-align:center;">
-     <p style="margin:0 0 6px;font-size:11px;color:rgba(255,255,255,0.75);text-transform:uppercase;letter-spacing:0.15em;">Your Booking Ticket</p>
-     <p style="margin:0 0 12px;font-size:13px;color:#fff;">Download and present your ticket at the studio.</p>
-     <a href="https://beccastouchstudio.vercel.app/track?id=${b.booking_id}" style="display:inline-block;background:#c8788a;color:#fff;text-decoration:none;padding:10px 24px;border-radius:30px;font-size:13px;font-weight:700;">📥 View &amp; Download Ticket</a>
+   <table style="width:100%;border-collapse:collapse;margin:16px 0;background:#fdf8ff;border-radius:12px;overflow:hidden;border:1px solid #ede0f8;">
+     ${dr2('Booking ID', b.booking_id as string)}
+     ${dr2('Type', bookingTypeLabel(b))}
+     ${b.preferred_date ? dr2('Date', b.preferred_date as string) : ''}
+     ${b.start_time ? dr2('Time', b.start_time as string) : ''}
+     ${b.total_amount ? dr2('Amount', (b.currency as string || 'NGN') + ' ' + Number(b.total_amount).toLocaleString()) : ''}
+     ${dr2('Name', b.client_name as string || '')}
+     ${b.phone ? dr2('Phone', b.phone as string) : ''}
+     ${b.email ? dr2('Email', b.email as string) : ''}
+   </table>
+   ${b.admin_note ? \`<div style="background:#f8f4ff;border:1px solid #d4c8f0;border-radius:12px;padding:14px 18px;margin:16px 0;"><p style="margin:0;font-size:12px;color:#6b3fa0;font-weight:600;">Note from our team:</p><p style="margin:6px 0 0;font-size:13px;color:#3d1f6e;">\${b.admin_note}</p></div>\` : ''}
+   <div style="margin:20px 0;text-align:center;">
+     <p style="font-size:13px;color:#3d1f6e;font-weight:600;margin-bottom:10px;">View or download your booking ticket:</p>
+     <a href="https://beccastouchstudio.vercel.app/track?id=${b.booking_id}" target="_blank" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">⬇ View &amp; Download Ticket</a>
    </div>
-   <p style="font-size:12px;color:#7a5090;">📍 <b>${ADDRESS}</b> — please arrive 15 minutes early. Questions? Call or WhatsApp us on ${PHONE}.</p>`
+   <p style="font-size:12px;color:#9a7090;margin-top:16px;">📍 <b>${ADDRESS}</b> — please arrive 10–15 minutes early.</p>
+   <p style="font-size:12px;color:#9a7090;margin-top:6px;">Questions? Call or WhatsApp: <b>${PHONE}</b></p>`
 );
 
 const tplRejected = (b: Record<string, unknown>) => shell(
-  `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">Update on your booking</h2>
-   <p style="margin:0 0 20px;font-size:13px;color:#7a5090;">Hi <b>${b.client_name}</b>, unfortunately we are unable to confirm this booking at this time.</p>
-   ${ib(b.booking_id as string)}
-   ${b.admin_note ? '<div style="background:#fff4f4;border-radius:12px;border:1px solid #f0c8c8;padding:14px 18px;margin-bottom:16px;"><p style="margin:0;font-size:13px;color:#6a2020;">' + b.admin_note + '</p></div>' : ''}
-   <div style="background:#fdf8ff;border-radius:12px;border:1px solid #ede8f5;padding:16px 18px;margin-top:14px;">
-     <p style="margin:0 0 8px;font-size:13px;color:#3d1f6e;font-weight:700;">Think this is a mistake?</p>
-     <p style="margin:0 0 6px;font-size:12px;color:#7a5090;">Please don't hesitate to reach out to us directly:</p>
-     <p style="margin:0 0 4px;font-size:12px;color:#3d1f6e;">📞 Call / WhatsApp: <b>${PHONE}</b></p>
-     <p style="margin:0;font-size:12px;color:#3d1f6e;">📍 Visit us: <b>${ADDRESS}</b></p>
+  `<h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">Booking Update</h2>
+   <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">Hi ${b.client_name as string || 'there'}, we have an update on your booking request.</p>
+   <div style="background:#fff0f0;border:1px solid #f0c8c8;border-radius:12px;padding:14px 18px;margin-bottom:16px;">
+     <p style="margin:0;font-size:13px;color:#b05860;font-weight:600;">Unfortunately, we were unable to confirm booking <b>${b.booking_id as string}</b> at this time.</p>
    </div>
-   <p style="margin-top:14px;font-size:12px;color:#9a7090;">We'd love to find another time that works — feel free to book again. 🌸</p>`
+   ${b.admin_note ? \`<div style="background:#fff8f0;border:1px solid #f0d8b0;border-radius:12px;padding:14px 18px;margin:16px 0;"><p style="margin:0;font-size:12px;color:#a07428;font-weight:600;">Note from our team:</p><p style="margin:6px 0 0;font-size:13px;color:#3d1f6e;">\${b.admin_note}</p></div>\` : ''}
+   <p style="font-size:13px;color:#3d1f6e;margin:16px 0;">If you think this is a mistake or would like to reschedule, please reach out:</p>
+   <div style="background:#f8f4ff;border:1px solid #d4c8f0;border-radius:12px;padding:14px 18px;">
+     <p style="margin:0 0 6px;font-size:13px;color:#3d1f6e;">📞 Call / WhatsApp: <b>${PHONE}</b></p>
+     <p style="margin:0;font-size:13px;color:#3d1f6e;">📍 Visit us: <b>${ADDRESS}</b></p>
+   </div>
+   <p style="font-size:12px;color:#9a7090;margin-top:16px;">We hope to serve you very soon. 💜</p>`
 );
 
 const tplAdmin = (b: Record<string, unknown>) => shell(
-  `<h2 style="margin:0 0 4px;font-size:20px;font-weight:800;color:#3d1f6e;">New booking — action needed</h2>
-   <p style="margin:0 0 16px;font-size:12px;font-weight:700;color:#c8788a;text-transform:uppercase;">${bookingTypeLabel(b)}</p>
-   ${ib(b.booking_id as string)}
-   <table cellpadding="0" cellspacing="0" style="width:100%;">
-     ${dr('Client', b.client_name as string)}
-     ${dr('Email', b.email as string)}
-     ${dr('Phone', b.phone as string)}
-     ${dr('Service', bookingTypeLabel(b))}
-     ${dr('Summary', b.client_summary as string || '—')}
-     ${b.preferred_date ? dr('Date', b.preferred_date as string) : ''}
-     ${b.start_time ? dr('Time', b.start_time as string) : ''}
-     ${b.total_amount ? dr('Amount', b.currency + ' ' + Number(b.total_amount).toLocaleString()) : ''}
-     ${b.notes ? dr('Notes', b.notes as string) : ''}
-   </table>`
+  `<h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">New Booking Received 📋</h2>
+   <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">A new <b>${bookingTypeLabel(b)}</b> booking just came in.</p>
+   <table style="width:100%;border-collapse:collapse;margin:16px 0;background:#fdf8ff;border-radius:12px;overflow:hidden;border:1px solid #ede0f8;">
+     ${dr2('Booking ID', b.booking_id as string)}
+     ${dr2('Type', bookingTypeLabel(b))}
+     ${b.preferred_date ? dr2('Date', b.preferred_date as string) : ''}
+     ${b.start_time ? dr2('Time', b.start_time as string) : ''}
+     ${b.occasion ? dr2('Occasion', b.occasion as string) : ''}
+     ${b.total_amount ? dr2('Amount', (b.currency as string || 'NGN') + ' ' + Number(b.total_amount).toLocaleString()) : ''}
+     ${dr2('Name', b.client_name as string || '')}
+     ${b.phone ? dr2('Phone', b.phone as string) : ''}
+     ${b.email ? dr2('Email', b.email as string) : ''}
+     ${b.notes ? dr2('Notes', b.notes as string) : ''}
+   </table>
+   <div style="margin-top:20px;text-align:center;">
+     <a href="https://beccastouchstudio.vercel.app/sg-bec" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review in Admin Panel →</a>
+   </div>
+   ${b.special_request_audio_url ? \`<p style="margin-top:14px;font-size:12px;color:#6b3fa0;">🎙️ Client sent a voice note — view it in the admin panel under this booking.</p>\` : ''}`
 );
 
 // ── Reminder template (2 hours before session) ────────────────────────────────
@@ -623,30 +637,39 @@ const tplReminder = (b: Record<string, unknown>) => shell(
    <p style="margin-top:8px;font-size:12px;color:#9a7090;">Thank you for choosing ${STUDIO} — we can't wait to see you! 🌸</p>`
 );
 
-async function notifySubmission(_fs: Firestore, b: Record<string, unknown>) {
+async function notifySubmission(fs: Firestore, b: Record<string, unknown>) {
+  const clientEmail = String(b.email || '').trim();
+  const adminEmail  = String(b.admin_email || ADMIN_EMAIL_CFG);
+  const typeLabel   = bookingTypeLabel(b);
   try {
-    const res = await fetch(EMAIL_FN, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'submitted', booking: b }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok) console.log('notifySubmission OK:', JSON.stringify(data));
-    else console.error('notifySubmission failed:', res.status, JSON.stringify(data));
+    // Client email
+    if (clientEmail) {
+      await sendMail(fs, clientEmail,
+        `Booking received — ${b.booking_id} | ${STUDIO}`,
+        tplReceived(b)
+      );
+    }
+    // Admin alert
+    await sendMail(fs, adminEmail,
+      `[${STUDIO}] New booking — ${b.booking_id} · ${typeLabel}`,
+      tplAdmin(b)
+    );
+    console.log('notifySubmission OK for', b.booking_id);
   } catch (e: unknown) { console.error('notifySubmission error:', (e as Error).message); }
 }
 
-async function notifyDecision(_fs: Firestore, b: Record<string, unknown>) {
-  const type = b.booking_status === 'confirmed' ? 'confirmed' : 'rejected';
+async function notifyDecision(fs: Firestore, b: Record<string, unknown>) {
+  const clientEmail = String(b.email || '').trim();
+  if (!clientEmail) { console.warn('notifyDecision: no client email for', b.booking_id); return; }
+  const isConfirmed = b.booking_status === 'confirmed';
   try {
-    const res = await fetch(EMAIL_FN, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, booking: b }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok) console.log('notifyDecision OK:', JSON.stringify(data));
-    else console.error('notifyDecision failed:', res.status, JSON.stringify(data));
+    await sendMail(fs, clientEmail,
+      isConfirmed
+        ? `Your booking is confirmed 🎉 — ${b.booking_id} | ${STUDIO}`
+        : `Update on your booking — ${b.booking_id} | ${STUDIO}`,
+      isConfirmed ? tplConfirmed(b) : tplRejected(b)
+    );
+    console.log('notifyDecision OK:', b.booking_id, b.booking_status);
   } catch (e: unknown) { console.error('notifyDecision error:', (e as Error).message); }
 }
 
