@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Syne:wght@400;500;700;800&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -139,5 +137,5 @@
 .bg-orange-100             { background-color: #f6dde2 !important; }
 .hover\:bg-orange-50:hover { background-color: #fbf2f3 !important; }
 
-/* Legacy ink — now purple */
+/* Legacy ink — */
 .ink-text { color: #3d1f6e; }
