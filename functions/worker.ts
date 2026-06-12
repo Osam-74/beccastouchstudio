@@ -36,6 +36,7 @@ const ADDRESS  = 'Total Filling Station, Oju-Irin Bodija, Ibadan, Oyo State';
 const DEFAULT_PIN = '12345678';
 const PAYMENT  = { bankName: 'First Bank', accountName: 'Beccastouch Studio', accountNumber: '0123456789', currency: 'NGN' };
 const PHONE    = '+234 802 327 4274';
+const WHATSAPP = '+234 805 198 2695';
 const TIKTOK   = '@beccastouch';
 const RULES = [
   'Your booking is provisional until payment is verified and the studio confirms your slot.',
@@ -454,7 +455,7 @@ function tplSubmitted(b: Record<string,unknown>) {
     </div>
     ${dtable(rows)}
     <p style="font-size:12px;color:#9a7090;margin-top:16px;">📍 <b>${ADDRESS}</b></p>
-    <p style="font-size:12px;color:#9a7090;margin-top:8px;">Questions? Reply to this email or WhatsApp us on <b>${PHONE}</b>.</p>`;
+    <p style="font-size:12px;color:#9a7090;margin-top:8px;">Questions? Reply to this email or WhatsApp us on <b>${WHATSAPP}</b>.</p>`;
 
   return shell('', '', body);
 }
@@ -481,7 +482,7 @@ function tplAdmin(b: Record<string,unknown>) {
     <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">A new <b>${typeLabel}</b> booking just came in.</p>
     ${dtable(rows)}
     <div style="margin-top:20px;text-align:center;">
-      <a href="https://beccastouchstudio.vercel.app/admin" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review in Admin Panel →</a>
+      <a href="https://beccastouchstudio.vercel.app/sg-bec" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review in Admin Panel →</a>
     </div>`;
 
   return shell('', '', body);
@@ -493,7 +494,7 @@ function tplStatusUpdate(b: Record<string,unknown>, note: string) {
   const isRejected  = (b.status as string) === 'rejected' || (b.status as string) === 'cancelled';
   const headline = isConfirmed ? 'Booking Confirmed! 🎉' : isRejected ? 'Update on Your Booking' : 'Booking Status Updated';
   const statusLabel = isConfirmed ? '✅ Confirmed' : isRejected ? '❌ Not confirmed' : String(b.status || '');
-  const trackUrl = `https://osam-74.github.io/beccastouchstudio/track?id=${b.booking_id}`;
+  const trackUrl = `https://beccastouchstudio.vercel.app/track-booking?id=${b.booking_id}`;
   const typeLabel = bookingTypeLabel(b);
 
   const rows =
@@ -530,7 +531,7 @@ function tplStatusUpdate(b: Record<string,unknown>, note: string) {
     ${noteHtml}
     ${confirmedExtra}
     ${rejectedExtra}
-    <p style="font-size:12px;color:#9a7090;margin-top:16px;">Questions? Reply to this email or WhatsApp us on <b>${PHONE}</b>.</p>`;
+    <p style="font-size:12px;color:#9a7090;margin-top:16px;">Questions? Reply to this email or WhatsApp us on <b>${WHATSAPP}</b>.</p>`;
 
   return shell('', '', body);
 }
@@ -545,11 +546,11 @@ async function notifySubmission(fs: Firestore, env: Env, b: Record<string,unknow
     let subject: string;
     if (isStudio) {
       const svcLabel = b.studio_use === 'content' ? 'Content Creation' : 'Photoshoot';
-      subject = `${svcLabel} booking received — ${b.booking_id} | ${STUDIO}`;
+      subject = `${svcLabel} booking received - ${b.booking_id} | ${STUDIO}`;
     } else if (isBridalOrSpecial) {
-      subject = `${b.occasion === 'bridal' ? 'Bridal' : 'Special'} request received — ${b.booking_id} | ${STUDIO}`;
+      subject = `${b.occasion === 'bridal' ? 'Bridal' : 'Special'} request received - ${b.booking_id} | ${STUDIO}`;
     } else {
-      subject = `Glam booking received — ${b.booking_id} | ${STUDIO}`;
+      subject = `Glam booking received - ${b.booking_id} | ${STUDIO}`;
     }
     try { await sendMail(env, clientEmail, subject, tplSubmitted(b), fs); } catch(e) { console.error('client email:', e); }
   }
@@ -557,7 +558,7 @@ async function notifySubmission(fs: Firestore, env: Env, b: Record<string,unknow
   const adminEmail = await fs.getConfig('smtp_user') || await fs.getConfig('gmail_email') || env.SMTP_USER || '';
   if (adminEmail) {
     const typeLabel = b.booking_type === 'studio' ? (b.studio_use === 'content' ? 'Content Creation' : 'Photoshoot') : String(b.occasion || 'Glam');
-    try { await sendMail(env, adminEmail, `[${STUDIO}] New booking — ${b.booking_id} | ${typeLabel}`, tplAdmin(b), fs); } catch(e) { console.error('admin email:', e); }
+    try { await sendMail(env, adminEmail, `[${STUDIO}] New booking - ${b.booking_id} | ${typeLabel}`, tplAdmin(b), fs); } catch(e) { console.error('admin email:', e); }
   }
 }
 
@@ -691,7 +692,7 @@ export default {
         const newStatus = (body.status || body.bookingStatus) as string;
         const updated = await fs.update('bookings', b.id as string, { status: newStatus, booking_status: newStatus, admin_note: (body.note || body.adminNote || '') as string });
         const note = (body.note as string) || '';
-        if (b.email) { try { await sendMail(env, b.email as string, `[${STUDIO}] Booking update — ${b.booking_id}`, tplStatusUpdate(updated, note), fs); } catch(e) { console.error('status update email:', e); } }
+        if (b.email) { try { await sendMail(env, b.email as string, `[${STUDIO}] Booking update - ${b.booking_id}`, tplStatusUpdate(updated, note), fs); } catch(e) { console.error('status update email:', e); } }
         return j({ ok: true, booking: toFE(updated) });
       }
 
@@ -833,14 +834,14 @@ export default {
         if (override === 'submitted') {
           html = tplSubmitted(b);
           const typeLabel = bookingTypeLabel(b);
-          subject = `[TEST] ${typeLabel} booking received — ${b.booking_id || 'TEST'} | ${STUDIO}`;
+          subject = `[TEST] ${typeLabel} booking received - ${b.booking_id || 'TEST'} | ${STUDIO}`;
         } else if (override === 'admin') {
           html = tplAdmin(b);
           const typeLabel = bookingTypeLabel(b);
-          subject = `[TEST] New booking — ${b.booking_id || 'TEST'} | ${typeLabel} | ${STUDIO}`;
+          subject = `[TEST] New booking - ${b.booking_id || 'TEST'} | ${typeLabel} | ${STUDIO}`;
         } else if (override === 'statusUpdate') {
           html = tplStatusUpdate(b, note);
-          subject = `[TEST] Booking update — ${b.booking_id || 'TEST'} | ${STUDIO}`;
+          subject = `[TEST] Booking update - ${b.booking_id || 'TEST'} | ${STUDIO}`;
         } else {
           html = shell('', '', `
             <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">Email is working! 🎉</h2>
@@ -881,7 +882,7 @@ export default {
           <p style="font-size:12px;color:#9a7090;margin-top:16px;">📍 <b>${ADDRESS}</b><br>📞 ${PHONE}<br>We cannot wait to see you! 🌸</p>`;
         const reminderHtml = shell('', '', reminderBody);
         try {
-          await sendMail(env, b.email as string, `Reminder: your session is in 2 hours — ${b.booking_id} | ${STUDIO}`, reminderHtml);
+          await sendMail(env, b.email as string, `Reminder: your session is in 2 hours - ${b.booking_id} | ${STUDIO}`, reminderHtml);
           return j({ ok: true });
         } catch(e: unknown) { return j({ error: (e as Error).message }, 500); }
       }
@@ -918,7 +919,7 @@ export default {
               <div style="margin-top:20px;text-align:center;">
                 <a href="https://beccastouchstudio.vercel.app/admin" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review in Admin Panel →</a>
               </div>`;
-            await sendMail(env, adminEmail, `[${STUDIO}] New shop order — ${orderId}`, shell('', '', shopBody));
+            await sendMail(env, adminEmail, `[${STUDIO}] New shop order - ${orderId}`, shell('', '', shopBody));
           } catch(e) { console.error('shop order admin email:', e); }
         }
         return j({ ok: true, orderId, order: saved });
