@@ -36,6 +36,7 @@ const ADDRESS = 'Total Filling Station, Oju-Irin Bodija, Ibadan, Oyo State';
 const DEFAULT_PIN = '12345678';
 const PAYMENT = { bankName: 'First Bank', accountName: 'Beccastouch Studio', accountNumber: '0123456789', currency: 'NGN' };
 const PHONE = '+234 802 327 4274';
+const WHATSAPP = '+234 805 198 2695';
 const TIKTOK = '@beccastouch';
 const INSTAGRAM = 'https://www.instagram.com/beccastouch';
 const RULES = [
@@ -546,7 +547,7 @@ const tplReceived = (b: Record<string, unknown>) => shell(
    </table>
    ${payHtml()}${rulesHtml()}
    <p style="font-size:12px;color:#9a7090;margin-top:16px;">📍 <b>${ADDRESS}</b></p>
-   <p style="font-size:12px;color:#9a7090;margin-top:8px;">Questions? Reply to this email or WhatsApp us on <b>${PHONE}</b>.</p>`
+  <p style="font-size:12px;color:#9a7090;margin-top:8px;">Questions? Reply to this email or WhatsApp us on <b>${WHATSAPP}</b>.</p>`
 );
 
 const tplBridal = (b: Record<string, unknown>) => shell(
@@ -578,7 +579,7 @@ const tplConfirmed = (b: Record<string, unknown>) => shell(
    ${b.admin_note ? \`<div style="background:#f8f4ff;border:1px solid #d4c8f0;border-radius:12px;padding:14px 18px;margin:16px 0;"><p style="margin:0;font-size:12px;color:#6b3fa0;font-weight:600;">Note from our team:</p><p style="margin:6px 0 0;font-size:13px;color:#3d1f6e;">\${b.admin_note}</p></div>\` : ''}
    <div style="margin:20px 0;text-align:center;">
      <p style="font-size:13px;color:#3d1f6e;font-weight:600;margin-bottom:10px;">View or download your booking ticket:</p>
-     <a href="https://beccastouchstudio.vercel.app/track?id=${b.booking_id}" target="_blank" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">⬇ View &amp; Download Ticket</a>
+    <a href="https://beccastouchstudio.vercel.app/track-booking?id=${b.booking_id}" target="_blank" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">⬇ View &amp; Download Ticket</a>
    </div>
    <p style="font-size:12px;color:#9a7090;margin-top:16px;">📍 <b>${ADDRESS}</b> — please arrive 10–15 minutes early.</p>
    <p style="font-size:12px;color:#9a7090;margin-top:6px;">Questions? Call or WhatsApp: <b>${PHONE}</b></p>`
@@ -645,13 +646,13 @@ async function notifySubmission(fs: Firestore, b: Record<string, unknown>) {
     // Client email
     if (clientEmail) {
       await sendMail(fs, clientEmail,
-        `Booking received — ${b.booking_id} | ${STUDIO}`,
-        tplReceived(b)
-      );
+          `Booking received - ${b.booking_id} | ${STUDIO}`,
+          tplReceived(b)
+        );
     }
     // Admin alert
     await sendMail(fs, adminEmail,
-      `[${STUDIO}] New booking — ${b.booking_id} · ${typeLabel}`,
+      `[${STUDIO}] New booking - ${b.booking_id} · ${typeLabel}`,
       tplAdmin(b)
     );
     console.log('notifySubmission OK for', b.booking_id);
@@ -665,8 +666,8 @@ async function notifyDecision(fs: Firestore, b: Record<string, unknown>) {
   try {
     await sendMail(fs, clientEmail,
       isConfirmed
-        ? `Your booking is confirmed 🎉 — ${b.booking_id} | ${STUDIO}`
-        : `Update on your booking — ${b.booking_id} | ${STUDIO}`,
+        ? `Your booking is confirmed 🎉 - ${b.booking_id} | ${STUDIO}`
+        : `Update on your booking - ${b.booking_id} | ${STUDIO}`,
       isConfirmed ? tplConfirmed(b) : tplRejected(b)
     );
     console.log('notifyDecision OK:', b.booking_id, b.booking_status);
@@ -955,7 +956,7 @@ Deno.serve(async (req: Request) => {
       if (!b || !b.email) return j({ error: 'Booking not found or no email' }, 404);
       try {
         await sendMail(fs, b.email as string,
-          `Reminder: your session is in 2 hours — ${b.booking_id} | ${STUDIO}`,
+          `Reminder: your session is in 2 hours - ${b.booking_id} | ${STUDIO}`,
           tplReminder(b));
         return j({ ok: true });
       } catch(e: unknown) { return j({ error: (e as Error).message }, 500); }
@@ -977,7 +978,7 @@ Deno.serve(async (req: Request) => {
         const itemRows = (o.items as Array<{name:string;qty:number;price:number}> || [])
           .map(i => dr(i.name, `x${i.qty} — NGN ${(i.price*i.qty).toLocaleString()}`)).join('');
         try {
-          await sendMail(fs, adminEmail, `[${STUDIO}] New shop order — ${orderId}`,
+          await sendMail(fs, adminEmail, `[${STUDIO}] New shop order - ${orderId}`,
             shell(`<h2 style="margin:0 0 16px;font-size:20px;font-weight:800;color:#3d1f6e;">New shop order 🛒</h2>
               <table cellpadding="0" cellspacing="0" style="width:100%;">
                 ${dr('Order ID', orderId)}${dr('Client', String(o.name))}${dr('Phone', String(o.phone))}
