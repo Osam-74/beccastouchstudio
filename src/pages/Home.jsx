@@ -60,7 +60,7 @@ export default function Home() {
           {/* left-edge soft fade */}
           <div style={{
             position: 'absolute', inset: 0,
-            background: 'linear-gradient(to left, rgba(230,230,250,0.5) 0%, transparent 35%)',
+            background: 'linear-gradient(to left, rgba(235,94,137,0.7) 0%, transparent 35%)',
             pointerEvents: 'none',
           }} />
         </div>
