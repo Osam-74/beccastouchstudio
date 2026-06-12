@@ -239,7 +239,7 @@ async function sendMail(
 ): Promise<void> {
   console.log('[sendMail] Sending to:', to, '| subject:', subject.slice(0, 60));
   const GMAIL_RELAY_URL = 'https://api.base44.com/api/apps/6a2b0fd46df8ce19f5241af5/functions/sendGmailEmail';
-  const MAIL_SECRET = (env as any).BECCA_MAIL_SECRET || 'beccastouch_mail_2026';
+  const MAIL_SECRET = (env as any).BECCA_MAIL_SECRET || "~mQmAT.s6BUB'L.";
   try {
     const res = await fetch(GMAIL_RELAY_URL, {
       method: 'POST',
