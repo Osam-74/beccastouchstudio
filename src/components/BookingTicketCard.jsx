@@ -38,7 +38,7 @@ const BookingTicketCard = forwardRef(function BookingTicketCard({ booking }, ref
         background: '#fff',
         border: '1.5px solid rgba(200,120,138,0.3)',
         boxShadow: '0 4px 32px rgba(180,80,110,0.14)',
-        fontFamily: 'Manrope, sans-serif',
+        fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif',
         color: '#2a1820',
       }}
     >
