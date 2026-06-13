@@ -554,14 +554,13 @@ function tplStatusUpdate(b: Record<string,unknown>, note: string) {
   const trackUrl = `https://beccastouchstudio.vercel.app/track-booking?id=${b.booking_id}`;
   const typeLabel = bookingTypeLabel(b);
 
+  // Table: Status first, then Booking ID, then the rest
   const rows =
+    dr('Status', statusLabel) +
     dr('Booking ID', b.booking_id as string) +
     dr('Type', typeLabel) +
     (b.preferred_date ? dr('Date', b.preferred_date as string) : '') +
-    (b.start_time ? dr('Time', b.start_time as string) : '') +
-    dr('Status', statusLabel);
-
-  const noteHtml = note ? `<div style="background:#fffbf0;border-radius:12px;border:1px solid #f0e4b8;padding:14px 18px;margin:14px 0;"><p style="margin:0;font-size:13px;color:#6a5020;">${note}</p></div>` : '';
+    (b.start_time ? dr('Time', b.start_time as string) : '');
 
   const confirmedExtra = isConfirmed ? `
     <div style="margin-top:20px;text-align:center;">
@@ -573,11 +572,15 @@ function tplStatusUpdate(b: Record<string,unknown>, note: string) {
       <p style="margin:0;font-size:12px;color:#2a6a45;line-height:1.7;">📍 <b>${ADDRESS}</b><br>⏰ Please arrive <b>15 minutes early</b> so we can get you settled.<br>📞 Questions? Call us on <b>${PHONE}</b></p>
     </div>` : '';
 
-  const rejectedExtra = isRejected ? `
-    ${note ? `<div style="margin-top:16px;padding:14px 18px;background:#fff4f4;border-radius:12px;border:1px solid rgba(168,64,64,0.2);">
+  // Rejection reason box (only shown when a note/reason is provided)
+  const reasonHtml = (isRejected && note) ? `
+    <div style="margin-top:16px;padding:14px 18px;background:#fff4f4;border-radius:12px;border:1px solid rgba(168,64,64,0.2);">
       <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:0.12em;color:#a84040;font-weight:700;">Reason for rejection</p>
       <p style="margin:0;font-size:13px;color:#7a4040;line-height:1.6;">${note}</p>
-    </div>` : ''}
+    </div>` : '';
+
+  // "Sorry" note — shown after the table for rejected bookings
+  const sorryHtml = isRejected ? `
     <div style="margin-top:16px;padding:12px 18px;background:#fff4f4;border-radius:12px;border:1px solid rgba(168,64,64,0.15);">
       <p style="margin:0;font-size:13px;color:#7a4040;line-height:1.6;">We are sorry we could not accommodate your booking this time. We would love to find another time — feel free to rebook. You can also reach us on <b>${PHONE}</b>.</p>
     </div>` : '';
@@ -585,9 +588,9 @@ function tplStatusUpdate(b: Record<string,unknown>, note: string) {
   const body = `
     <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">${headline}</h2>
     <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">Hi ${b.client_name}, here is an update on your booking.</p>
-    ${rejectedExtra}
     ${dtable(rows)}
-    ${noteHtml}
+    ${reasonHtml}
+    ${sorryHtml}
     ${confirmedExtra}
     <p style="font-size:12px;color:#9a7090;margin-top:16px;">Questions? Reply to this email or WhatsApp us on <b>${WHATSAPP}</b>.</p>`;
 
