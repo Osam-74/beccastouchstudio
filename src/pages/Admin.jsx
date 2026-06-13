@@ -146,6 +146,19 @@ function AdminFab({ activeTab, setActiveTab }) {
   );
 }
 
+/* ─── booking helpers (module-scope so all components can use them) ─── */
+function isExpiredBooking(b) {
+  if (!b.preferredDate) return false;
+  // Only pending/draft can be "expired" — confirmed/rejected/archived are final
+  if (!['pending','draft'].includes(b.bookingStatus)) return false;
+  const today = new Date(); today.setHours(0,0,0,0);
+  return new Date(b.preferredDate + 'T00:00:00') < today;
+}
+function effectiveStatus(b) {
+  if (isExpiredBooking(b)) return 'expired';
+  return b.bookingStatus;
+}
+
 /* ─── reject panel sub-component ─── */
 function RejectPanel({ busy, rejectionReason, setRejectionReason, onReject }) {
   const [open, setOpen] = useState(false);
@@ -187,7 +200,7 @@ function RejectPanel({ busy, rejectionReason, setRejectionReason, onReject }) {
 }
 
 /* ─── detail panel ─── */
-function DetailPanel({ booking, note, setNote, rejectionReason, setRejectionReason, onClose, onUpdate, onArchive, onRestore, onDelete, busy, isExpiredBooking }) {
+function DetailPanel({ booking, note, setNote, rejectionReason, setRejectionReason, onClose, onUpdate, onArchive, onRestore, onDelete, busy }) {
   if (!booking) return (
     <div className="rose-card p-8 flex flex-col items-center justify-center min-h-[200px] text-sm text-[#9a7080]">
       <Ticket size={28} className="mb-3 text-[#eecdd4]"/>
@@ -204,7 +217,7 @@ function DetailPanel({ booking, note, setNote, rejectionReason, setRejectionReas
             <p className="font-mono text-xs text-[#9a7080] mt-0.5">{booking.bookingId}</p>
           </div>
           <div className="flex items-center gap-2">
-            <Badge status={effectiveStatus ? effectiveStatus(booking) : booking.bookingStatus}/>
+            <Badge status={effectiveStatus(booking)}/>
             {onClose && <button type="button" onClick={onClose} className="lg:hidden text-[#9a7080]"><X size={15}/></button>}
           </div>
         </div>
@@ -364,7 +377,7 @@ function CalendarModal({ booking, onClose, onMarkAttended, busy }) {
               <p className="font-mono text-xs text-[#9a7080] mt-0.5">{booking.bookingId}</p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <Badge status={effectiveStatus ? effectiveStatus(booking) : booking.bookingStatus}/>
+              <Badge status={effectiveStatus(booking)}/>
               <button type="button" onClick={onClose} className="w-8 h-8 rounded-full border border-[#eecdd4] bg-white flex items-center justify-center text-[#9a7080]"><X size={14}/></button>
             </div>
           </div>
@@ -469,7 +482,7 @@ function CalendarTab({ bookings, onMarkAttended, loadingId }) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-1">
                   <p className="font-semibold text-[#3d1f6e] text-sm truncate">{b.clientName}</p>
-                  <Badge status={effectiveStatus ? effectiveStatus(b) : b.bookingStatus}/>
+                  <Badge status={effectiveStatus(b)}/>
                 </div>
                 <p className="font-mono text-xs text-[#9a7080]">{b.bookingId}</p>
                 <p className="text-xs text-[#7a5460] mt-1">{b.summary}</p>
@@ -551,7 +564,7 @@ function UsersTab({ bookings, onDeleteUser }) {
                 <div key={b.bookingId} className="rounded-2xl bg-white/70 border border-[#eed4da] p-3">
                   <div className="flex items-center justify-between mb-1">
                     <p className="font-mono text-xs text-[#9a7080]">{b.bookingId}</p>
-                    <Badge status={effectiveStatus ? effectiveStatus(b) : b.bookingStatus}/>
+                    <Badge status={effectiveStatus(b)}/>
                   </div>
                   <p className="text-xs text-[#3d1f6e]">{b.summary}</p>
                   <p className="text-xs text-[#9a7080] mt-0.5">{b.preferredDate||'No date'} · {b.currency} {Number(b.totalAmount||0).toLocaleString()}</p>
@@ -600,7 +613,7 @@ function UsersTab({ bookings, onDeleteUser }) {
                     <div key={b.bookingId} className="rounded-2xl bg-white/70 border border-[#eed4da] p-3">
                       <div className="flex items-center justify-between mb-1">
                         <p className="font-mono text-xs text-[#9a7080]">{b.bookingId}</p>
-                        <Badge status={effectiveStatus ? effectiveStatus(b) : b.bookingStatus}/>
+                        <Badge status={effectiveStatus(b)}/>
                       </div>
                       <p className="text-xs text-[#3d1f6e]">{b.summary}</p>
                       <p className="text-xs text-[#9a7080] mt-0.5">{b.preferredDate||'No date'} · {b.currency} {Number(b.totalAmount||0).toLocaleString()}</p>
@@ -1020,7 +1033,7 @@ export default function Admin() {
                   <div key={b.bookingId} className="glass-card p-4">
                     <div className="flex items-center justify-between mb-1">
                       <p className="font-semibold text-sm">{b.clientName}</p>
-                      <Badge status={effectiveStatus ? effectiveStatus(b) : b.bookingStatus}/>
+                      <Badge status={effectiveStatus(b)}/>
                     </div>
                     <p className="font-mono text-xs text-[#9a7080]">{b.bookingId} · {b.preferredDate||'No date'}</p>
                   </div>
@@ -1063,7 +1076,7 @@ export default function Admin() {
                               <p className="font-semibold text-sm text-[#3d1f6e]">{b.clientName}</p>
                               <div className="flex items-center gap-1.5">
                                 {b.serviceAttended && <CheckCircle2 size={12} className="text-[#3d7a53]"/>}
-                                <Badge status={effectiveStatus ? effectiveStatus(b) : b.bookingStatus}/>
+                                <Badge status={effectiveStatus(b)}/>
                               </div>
                             </div>
                             <p className="font-mono text-[10px] text-[#9a7080] mb-1">{b.bookingId} · {b.bookingType}</p>
@@ -1081,7 +1094,7 @@ export default function Admin() {
                   <DetailPanel booking={selectedBooking} note={note} setNote={setNote}
                     rejectionReason={rejectionReason} setRejectionReason={setRejectionReason}
                     onUpdate={updateStatus} onArchive={archiveBooking} onRestore={restoreBooking}
-                    onDelete={deleteBooking} isExpiredBooking={isExpiredBooking}
+                    onDelete={deleteBooking}
                     busy={loadingId===selectedBooking?.bookingId}/>
                 </div>
               </div>
@@ -1115,7 +1128,7 @@ export default function Admin() {
               rejectionReason={rejectionReason} setRejectionReason={setRejectionReason}
               onClose={()=>setSheetOpen(false)}
               onUpdate={updateStatus} onArchive={archiveBooking} onRestore={restoreBooking}
-              onDelete={deleteBooking} isExpiredBooking={isExpiredBooking}
+              onDelete={deleteBooking}
               busy={loadingId===selectedBooking?.bookingId}/>
           </div>
         </>
