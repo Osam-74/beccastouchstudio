@@ -3,7 +3,7 @@ import { getAuth } from 'firebase/auth';
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'firebase-web-key',
+  apiKey: 'AIzaSyClmvYRY8dyvabeRyCTRde4gk59rTcnBho',
   authDomain: 'beccastouch-studio.firebaseapp.com',
   projectId: 'beccastouch-studio',
   storageBucket: 'beccastouch-studio.firebasestorage.app',
@@ -17,10 +17,6 @@ export const firebaseStorage = getStorage(firebaseApp);
 
 /**
  * Upload a file to Firebase Storage and return the public download URL.
- * @param {File} file
- * @param {string} folder e.g. 'products'
- * @param {function} onProgress (0-100) optional
- * @returns {Promise<string>} download URL
  */
 export async function uploadToStorage(file, folder = 'products', onProgress = null) {
   const ext = file.name.split('.').pop();
