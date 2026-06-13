@@ -446,7 +446,7 @@ async function notifySubmission(fs, env, b) {
       console.error("client email:", e);
     }
   }
-  const adminEmail = await fs.getConfig("smtp_user") || await fs.getConfig("gmail_email") || env.SMTP_USER || "";
+  const adminEmail = env.ADMIN_EMAIL || "beccastouchstudio@gmail.com";
   if (adminEmail) {
     const typeLabel = b.booking_type === "studio" ? b.studio_use === "content" ? "Content Creation" : "Photoshoot" : String(b.occasion || "Glam");
     try {
@@ -531,8 +531,7 @@ var worker_default = {
       if (action === "getAdminProfile") {
         await requireAdmin();
         const profile = await fs.get("config", "admin_profile") || {};
-        const smtpUser = env.SMTP_USER || await fs.getConfig("smtp_user") || "";
-        return j({ ok: true, profile, smtp_configured: !!smtpUser, smtp_user: smtpUser });
+        return j({ ok: true, profile, email_provider: "Base44 Gmail", email_configured: true });
       }
       if (action === "saveAdminProfile") {
         await requireAdmin();
@@ -740,7 +739,7 @@ var worker_default = {
           status: "pending",
           notes: o.notes || ""
         });
-        const adminEmail = await fs.getConfig("smtp_user") || await fs.getConfig("gmail_email") || env.SMTP_USER || "";
+        const adminEmail = env.ADMIN_EMAIL || "beccastouchstudio@gmail.com";
         if (adminEmail) {
           const itemRows = (o.items || []).map((i) => dr(i.name, `x${i.qty} \u2014 NGN ${(i.price * i.qty).toLocaleString()}`)).join("");
           try {
@@ -817,7 +816,7 @@ var worker_default = {
         const staleOrders = allOrders.filter(
           (o) => o.status === "pending" && o.created_date < twoHoursAgo && !o.reminder_sent
         );
-        const adminEmail = await fs.getConfig("smtp_user") || await fs.getConfig("gmail_email") || env.SMTP_USER || "";
+        const adminEmail = env.ADMIN_EMAIL || "beccastouchstudio@gmail.com";
         if (!adminEmail) return j({ ok: true, reminded: 0 });
         let reminded = 0;
         for (const b of stale) {

@@ -635,14 +635,14 @@ function UsersTab({ bookings, onDeleteUser }) {
 }
 
 /* ─── Email setup panel ─── */
-function EmailSetupPanel({ pin }) {
+function EmailSetupPanel({ apiCall }) {
   const [testing, setTesting] = useState(false);
   const { showToast } = useToast();
 
   async function testEmail() {
     try {
       setTesting(true);
-      await api('testEmail');
+      await apiCall('testEmail');
       showToast('Test email sent to beccastouchstudio@gmail.com ✓', 'success');
     } catch(e) { showToast(e.message, 'error'); }
     finally { setTesting(false); }
@@ -655,8 +655,9 @@ function EmailSetupPanel({ pin }) {
         <p className="font-semibold text-[#3d1f6e] text-sm">Email notifications</p>
       </div>
       <div className="flex items-center gap-2 text-sm text-[#3d7a53] bg-[#f0faf3] rounded-[12px] px-4 py-3 border border-[#b8e0c8]">
-        <CheckCircle size={14}/> <span>Active via <b>Gmail OAuth</b> — sending as <b>beccastouchstudio@gmail.com</b></span>
+        <CheckCircle size={14}/> <span>✅ Active via <b>Base44 Gmail</b> — sending as <b>beccastouchstudio@gmail.com</b></span>
       </div>
+      <p className="text-[10px] text-[#9a7080] leading-relaxed">All booking confirmation, rejection and order emails are routed through your Gmail account via Base44 OAuth. No third-party relay or API keys needed.</p>
       <button type="button" onClick={testEmail} disabled={testing} className="btn-rose text-xs">
         {testing ? 'Sending…' : '✉ Send test email'}
       </button>
@@ -665,7 +666,7 @@ function EmailSetupPanel({ pin }) {
 }
 
 /* ─── settings tab ─── */
-function SettingsTab({ pin, idToken, getFreshToken, adminProfile, onProfileSaved, logout }) {
+function SettingsTab({ pin, idToken, getFreshToken, adminProfile, onProfileSaved, logout, api }) {
 
   const [adminName, setAdminName] = useState(adminProfile?.name || 'Admin');
   const [savingProfile, setSavingProfile] = useState(false);
@@ -702,7 +703,7 @@ function SettingsTab({ pin, idToken, getFreshToken, adminProfile, onProfileSaved
         </div>
       </div>
       {/* Gmail email setup */}
-      <EmailSetupPanel pin={pin}/>
+      <EmailSetupPanel apiCall={api}/>
       {/* Password change — now handled via Firebase */}
       <div className="rose-card p-6">
         <p className="font-semibold text-[#3d1f6e] mb-1">Change password</p>
@@ -1108,7 +1109,7 @@ export default function Admin() {
           {activeTab==='users' && <UsersTab bookings={bookings} onDeleteUser={deleteUser}/>}
 
           {/* ── SETTINGS TAB ── */}
-          {activeTab==='settings' && <SettingsTab pin={pin} idToken={idToken} getFreshToken={getFreshToken} adminProfile={adminProfile} onProfileSaved={name=>setAdminProfile(p=>({...p,name}))} logout={logout}/>}
+          {activeTab==='settings' && <SettingsTab pin={pin} api={api} idToken={idToken} getFreshToken={getFreshToken} adminProfile={adminProfile} onProfileSaved={name=>setAdminProfile(p=>({...p,name}))} logout={logout}/>}
 
           {/* ── SHOP TAB ── */}
           {activeTab==='shop' && <AdminShopTab pin={pin} idToken={idToken} getFreshToken={getFreshToken}/>}

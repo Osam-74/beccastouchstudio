@@ -3,4 +3,4 @@ main = "worker.bundled.js"
 compatibility_date = "2024-09-23"
 
 [vars]
-SMTP_USER = "beccastouchstudio@gmail.com"
+ADMIN_EMAIL = "beccastouchstudio@gmail.com"

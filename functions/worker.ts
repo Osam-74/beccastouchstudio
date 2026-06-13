@@ -595,7 +595,7 @@ function tplStatusUpdate(b: Record<string,unknown>, note: string) {
 }
 
 async function notifySubmission(fs: Firestore, env: Env, b: Record<string,unknown>): Promise<void> {
-  // Pass fs so sendMail can read Brevo config from Firestore
+  // Send confirmation emails via Base44 Gmail relay
   // Client email
   const clientEmail = (b.email as string || '').trim();
   if (clientEmail) {
@@ -613,7 +613,7 @@ async function notifySubmission(fs: Firestore, env: Env, b: Record<string,unknow
     try { await sendMail(env, clientEmail, subject, tplSubmitted(b), fs); } catch(e) { console.error('client email:', e); }
   }
   // Admin email
-  const adminEmail = await fs.getConfig('smtp_user') || await fs.getConfig('gmail_email') || env.SMTP_USER || '';
+  const adminEmail = env.ADMIN_EMAIL || 'beccastouchstudio@gmail.com';
   if (adminEmail) {
     const typeLabel = b.booking_type === 'studio' ? (b.studio_use === 'content' ? 'Content Creation' : 'Photoshoot') : String(b.occasion || 'Glam');
     try { await sendMail(env, adminEmail, `[${STUDIO}] New booking - ${b.booking_id} | ${typeLabel}`, tplAdmin(b), fs); } catch(e) { console.error('admin email:', e); }
@@ -729,8 +729,7 @@ export default {
       if (action === 'getAdminProfile') {
         await requireAdmin();
         const profile = await fs.get('config', 'admin_profile') || {};
-        const smtpUser = env.SMTP_USER || await fs.getConfig('smtp_user') || '';
-        return j({ ok: true, profile, smtp_configured: !!smtpUser, smtp_user: smtpUser });
+        return j({ ok: true, profile, email_provider: 'Base44 Gmail', email_configured: true });
       }
 
       // ── saveAdminProfile ────────────────────────────────────────────────────
@@ -965,7 +964,7 @@ export default {
           total_amount: Number(o.total_amount || 0), currency: 'NGN',
           status: 'pending', notes: o.notes || '',
         });
-        const adminEmail = await fs.getConfig('smtp_user') || await fs.getConfig('gmail_email') || env.SMTP_USER || '';
+        const adminEmail = env.ADMIN_EMAIL || 'beccastouchstudio@gmail.com';
         if (adminEmail) {
           const itemRows = ((o.items as Array<{name:string;qty:number;price:number}>) || [])
             .map(i => dr(i.name, `x${i.qty} — NGN ${(i.price*i.qty).toLocaleString()}`)).join('');
@@ -1060,7 +1059,7 @@ export default {
           (o.created_date as string) < twoHoursAgo && !(o.reminder_sent as boolean)
         );
 
-        const adminEmail = await fs.getConfig('smtp_user') || await fs.getConfig('gmail_email') || env.SMTP_USER || '';
+        const adminEmail = env.ADMIN_EMAIL || 'beccastouchstudio@gmail.com';
         if (!adminEmail) return j({ ok: true, reminded: 0 });
 
         let reminded = 0;
