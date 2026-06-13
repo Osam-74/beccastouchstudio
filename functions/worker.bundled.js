@@ -1,4 +1,4 @@
-// functions/worker.ts
+// worker.ts
 var CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "content-type, authorization",
@@ -397,8 +397,7 @@ function tplStatusUpdate(b, note) {
   const statusLabel = isConfirmed ? "\u2705 Confirmed" : isRejected ? "\u274C Rejected" : String(b.status || "");
   const trackUrl = `https://beccastouchstudio.vercel.app/track-booking?id=${b.booking_id}`;
   const typeLabel = bookingTypeLabel(b);
-  const rows = dr("Booking ID", b.booking_id) + dr("Type", typeLabel) + (b.preferred_date ? dr("Date", b.preferred_date) : "") + (b.start_time ? dr("Time", b.start_time) : "") + dr("Status", statusLabel);
-  const noteHtml = note ? `<div style="background:#fffbf0;border-radius:12px;border:1px solid #f0e4b8;padding:14px 18px;margin:14px 0;"><p style="margin:0;font-size:13px;color:#6a5020;">${note}</p></div>` : "";
+  const rows = dr("Status", statusLabel) + dr("Booking ID", b.booking_id) + dr("Type", typeLabel) + (b.preferred_date ? dr("Date", b.preferred_date) : "") + (b.start_time ? dr("Time", b.start_time) : "");
   const confirmedExtra = isConfirmed ? `
     <div style="margin-top:20px;text-align:center;">
       <a href="${trackUrl}" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;font-size:14px;font-weight:700;padding:14px 28px;border-radius:50px;text-decoration:none;">\u2B07\uFE0F Download Your Ticket</a>
@@ -408,20 +407,21 @@ function tplStatusUpdate(b, note) {
     <div style="margin-top:16px;padding:12px 18px;background:#f0faf5;border-radius:12px;border:1px solid rgba(40,160,100,0.2);">
       <p style="margin:0;font-size:12px;color:#2a6a45;line-height:1.7;">\u{1F4CD} <b>${ADDRESS}</b><br>\u23F0 Please arrive <b>15 minutes early</b> so we can get you settled.<br>\u{1F4DE} Questions? Call us on <b>${PHONE}</b></p>
     </div>` : "";
-  const rejectedExtra = isRejected ? `
-    ${note ? `<div style="margin-top:16px;padding:14px 18px;background:#fff4f4;border-radius:12px;border:1px solid rgba(168,64,64,0.2);">
+  const reasonHtml = isRejected && note ? `
+    <div style="margin-top:16px;padding:14px 18px;background:#fff4f4;border-radius:12px;border:1px solid rgba(168,64,64,0.2);">
       <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:0.12em;color:#a84040;font-weight:700;">Reason for rejection</p>
       <p style="margin:0;font-size:13px;color:#7a4040;line-height:1.6;">${note}</p>
-    </div>` : ""}
+    </div>` : "";
+  const sorryHtml = isRejected ? `
     <div style="margin-top:16px;padding:12px 18px;background:#fff4f4;border-radius:12px;border:1px solid rgba(168,64,64,0.15);">
       <p style="margin:0;font-size:13px;color:#7a4040;line-height:1.6;">We are sorry we could not accommodate your booking this time. We would love to find another time \u2014 feel free to rebook. You can also reach us on <b>${PHONE}</b>.</p>
     </div>` : "";
   const body = `
     <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">${headline}</h2>
     <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">Hi ${b.client_name}, here is an update on your booking.</p>
-    ${rejectedExtra}
     ${dtable(rows)}
-    ${noteHtml}
+    ${reasonHtml}
+    ${sorryHtml}
     ${confirmedExtra}
     <p style="font-size:12px;color:#9a7090;margin-top:16px;">Questions? Reply to this email or WhatsApp us on <b>${WHATSAPP}</b>.</p>`;
   return shell("", "", body);
