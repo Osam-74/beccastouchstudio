@@ -902,7 +902,7 @@ var worker_default = {
             ${dtable(dr("Booking ID", b.booking_id) + dr("Client", b.client_name) + dr("Phone", b.phone) + dr("Type", bookingTypeLabel(b)) + (b.preferred_date ? dr("Date", b.preferred_date) : "") + dr("Submitted", new Date(b.created_date).toLocaleString("en-GB")))}
             <div style="margin-top:20px;text-align:center;"><a href="https://beccastouchstudio.vercel.app/sg-bec" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review in Admin Panel \u2192</a></div>`);
           try {
-            await sendMail(env, adminEmail, `[${STUDIO}] \u23F0 Booking pending 2h+ \u2014 ${b.booking_id}`, html, fs);
+            await sendMail(env, adminEmail, `[${STUDIO}] \u23F0 Booking pending 2h+ - ${b.booking_id}`, html, fs);
             await fs.update("bookings", b.id, { reminder_sent: true });
             reminded++;
           } catch (e) {
@@ -916,7 +916,7 @@ var worker_default = {
             ${dtable(dr("Order ID", String(o.order_id || o.id)) + dr("Client", o.name) + dr("Phone", o.phone) + dr("Submitted", new Date(o.created_date).toLocaleString("en-GB")))}
             <div style="margin-top:20px;text-align:center;"><a href="https://beccastouchstudio.vercel.app/sg-bec" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review Orders \u2192</a></div>`);
           try {
-            await sendMail(env, adminEmail, `[${STUDIO}] \u23F0 Shop order pending 2h+ \u2014 ${String(o.order_id || o.id)}`, html, fs);
+            await sendMail(env, adminEmail, `[${STUDIO}] \u23F0 Shop order pending 2h+ - ${String(o.order_id || o.id)}`, html, fs);
             await fs.update("shop_orders", o.id, { reminder_sent: true });
             reminded++;
           } catch (e) {

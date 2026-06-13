@@ -1149,7 +1149,7 @@ export default {
             <p style="margin:0 0 16px;font-size:13px;color:#9a7080;">A booking has been waiting over 2 hours without a response.</p>
             ${dtable(dr('Booking ID',b.booking_id as string)+dr('Client',b.client_name as string)+dr('Phone',b.phone as string)+dr('Type',bookingTypeLabel(b))+(b.preferred_date?dr('Date',b.preferred_date as string):'')+dr('Submitted',new Date(b.created_date as string).toLocaleString('en-GB')))}
             <div style="margin-top:20px;text-align:center;"><a href="https://beccastouchstudio.vercel.app/sg-bec" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review in Admin Panel →</a></div>`);
-          try { await sendMail(env, adminEmail, `[${STUDIO}] ⏰ Booking pending 2h+ — ${b.booking_id}`, html, fs); await fs.update('bookings', b.id as string, { reminder_sent: true }); reminded++; }
+          try { await sendMail(env, adminEmail, `[${STUDIO}] ⏰ Booking pending 2h+ - ${b.booking_id}`, html, fs); await fs.update('bookings', b.id as string, { reminder_sent: true }); reminded++; }
           catch(e) { console.error('reminder failed:', e); }
         }
         for (const o of staleOrders) {
@@ -1158,7 +1158,7 @@ export default {
             <p style="margin:0 0 16px;font-size:13px;color:#9a7080;">A shop order has been waiting over 2 hours without action.</p>
             ${dtable(dr('Order ID',String(o.order_id||o.id))+dr('Client',o.name as string)+dr('Phone',o.phone as string)+dr('Submitted',new Date(o.created_date as string).toLocaleString('en-GB')))}
             <div style="margin-top:20px;text-align:center;"><a href="https://beccastouchstudio.vercel.app/sg-bec" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review Orders →</a></div>`);
-          try { await sendMail(env, adminEmail, `[${STUDIO}] ⏰ Shop order pending 2h+ — ${String(o.order_id||o.id)}`, html, fs); await fs.update('shop_orders', o.id as string, { reminder_sent: true }); reminded++; }
+          try { await sendMail(env, adminEmail, `[${STUDIO}] ⏰ Shop order pending 2h+ - ${String(o.order_id||o.id)}`, html, fs); await fs.update('shop_orders', o.id as string, { reminder_sent: true }); reminded++; }
           catch(e) { console.error('order reminder failed:', e); }
         }
         return j({ ok: true, reminded, staleBookings: stale.length, staleOrders: staleOrders.length });
