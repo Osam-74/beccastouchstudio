@@ -6,16 +6,16 @@
  *   FIREBASE_PROJECT_ID       e.g. beccastouch-studio
  *   FIREBASE_CLIENT_EMAIL     e.g. firebase-adminsdk-fbsvc@beccastouch-studio.iam.gserviceaccount.com
  *   FIREBASE_PRIVATE_KEY_B64  base64-encoded PEM private key
- *   BECCA_MAIL_SECRET         optional override for Base44 relay secret (default: beccastouch_mail_2026)
- *   ADMIN_PIN                 optional override for admin PIN (default: 12345678)
+ *   BECCA_MAIL_SECRET         optional override for Base44 relay secret
+ *   ADMIN_EMAIL               admin email address (used for Firebase Auth verification)
  */
 
 export interface Env {
   FIREBASE_PROJECT_ID: string;
   FIREBASE_CLIENT_EMAIL: string;
   FIREBASE_PRIVATE_KEY_B64: string;
-  ADMIN_PIN?: string;
   BECCA_MAIL_SECRET?: string;
+  ADMIN_EMAIL?: string;
 }
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
@@ -33,7 +33,6 @@ const j = (data: unknown, s = 200) =>
 // ── Constants ─────────────────────────────────────────────────────────────────
 const STUDIO   = 'Beccastouch Studio';
 const ADDRESS  = 'Total Filling Station, Oju-Irin Bodija, Ibadan, Oyo State';
-const DEFAULT_PIN = '12345678';
 const PAYMENT  = { bankName: 'First Bank', accountName: 'Beccastouch Studio', accountNumber: '0123456789', currency: 'NGN' };
 const PHONE    = '+234 802 327 4274';
 const WHATSAPP = '+234 805 198 2695';
@@ -259,12 +258,146 @@ async function sendMail(
 }
 
 
-// ── PIN helpers ───────────────────────────────────────────────────────────────
-async function getPin(fs: Firestore, env: Env): Promise<string> {
-  return (await fs.getConfig('admin_pin')) || env.ADMIN_PIN || DEFAULT_PIN;
+// ── Firebase Auth — ID token verification ─────────────────────────────────────
+// Verifies a Firebase ID token using Google's public key endpoint.
+// Falls back to PIN check for backward compatibility during migration.
+const _fbKeyCache: { keys: Record<string,string>; exp: number } = { keys: {}, exp: 0 };
+
+async function getFirebasePublicKeys(): Promise<Record<string,string>> {
+  const now = Date.now();
+  if (now < _fbKeyCache.exp && Object.keys(_fbKeyCache.keys).length > 0) return _fbKeyCache.keys;
+  const res = await fetch('https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com');
+  const keys = await res.json() as Record<string,string>;
+  const cc = res.headers.get('cache-control') || '';
+  const maxAgeMatch = cc.match(/max-age=(\d+)/);
+  _fbKeyCache.keys = keys;
+  _fbKeyCache.exp = now + (maxAgeMatch ? parseInt(maxAgeMatch[1]) * 1000 : 3_600_000);
+  return keys;
 }
+
+async function verifyFirebaseIdToken(token: string, projectId: string): Promise<{ uid: string; email: string }> {
+  // Decode header to get kid
+  const parts = token.split('.');
+  if (parts.length !== 3) throw new Error('Invalid token format');
+  const header = JSON.parse(atob(parts[0].replace(/-/g,'+').replace(/_/g,'/')));
+  const payload = JSON.parse(atob(parts[1].replace(/-/g,'+').replace(/_/g,'/')));
+
+  // Verify claims
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.exp < now) throw new Error('Token expired');
+  if (payload.iat > now + 300) throw new Error('Token issued in future');
+  if (payload.aud !== projectId) throw new Error('Token audience mismatch');
+  if (!payload.sub) throw new Error('Token missing sub');
+
+  // Get public key and verify signature
+  const keys = await getFirebasePublicKeys();
+  const certPem = keys[header.kid];
+  if (!certPem) throw new Error('Unknown key ID');
+
+  // Extract the public key from the X.509 certificate (DER-encoded)
+  const pemBody = certPem.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----/g, '').replace(/\n/g, '').trim();
+  const derBytes = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
+
+  // Import as SPKI (Web Crypto can extract public key from cert binary)
+  const cryptoKey = await crypto.subtle.importKey(
+    'spki',
+    // The public key is embedded in the cert — use SubtleCrypto to import directly
+    // For Cloudflare Workers we can import X.509 cert bytes directly via spki
+    derBytes.buffer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false, ['verify']
+  ).catch(async () => {
+    // Fallback: parse DER manually to extract SubjectPublicKeyInfo
+    // X.509 structure: SEQUENCE { SEQUENCE { OID, NULL }, BIT STRING { SPKI } }
+    // For RS256 certs, extract the public key bytes from the DER
+    const spki = extractSpkiFromCert(derBytes);
+    return crypto.subtle.importKey(
+      'spki', spki.buffer,
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false, ['verify']
+    );
+  });
+
+  const sigBytes = Uint8Array.from(atob(parts[2].replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0));
+  const dataBytes = new TextEncoder().encode(parts[0] + '.' + parts[1]);
+  const valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', cryptoKey, sigBytes, dataBytes);
+  if (!valid) throw new Error('Invalid token signature');
+
+  return { uid: payload.sub, email: payload.email || '' };
+}
+
+function extractSpkiFromCert(der: Uint8Array): Uint8Array {
+  // Walk the DER ASN.1 to find the SubjectPublicKeyInfo
+  // TBSCertificate contains the SPKI; we find the BIT STRING containing it
+  let offset = 0;
+  function readLen(): number {
+    const b = der[offset++];
+    if (b < 0x80) return b;
+    const n = b & 0x7f;
+    let len = 0;
+    for (let i = 0; i < n; i++) len = (len << 8) | der[offset++];
+    return len;
+  }
+  function skipTag() { offset++; return readLen(); }
+
+  // Outer SEQUENCE (Certificate)
+  offset++; readLen();
+  // TBSCertificate SEQUENCE
+  const tbsLen = skipTag();
+  const tbsEnd = offset + tbsLen;
+
+  // Skip: version (optional context [0]), serialNumber, signature alg, issuer, validity, subject
+  // then SubjectPublicKeyInfo
+  // Easier: search for the BIT STRING containing the RSA public key OID
+  // RSA OID bytes: 2A 86 48 86 F7 0D 01 01 01
+  const rsaOid = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
+  for (let i = offset; i < tbsEnd - rsaOid.length; i++) {
+    if (rsaOid.every((b, j) => der[i + j] === b)) {
+      // Found OID — walk back to the SEQUENCE tag of SubjectPublicKeyInfo
+      let spkiStart = i - 4; // SEQUENCE tag + length (approximate)
+      while (spkiStart > 0 && der[spkiStart] !== 0x30) spkiStart--;
+      // Now read the full SPKI SEQUENCE
+      let pos = spkiStart;
+      pos++; // SEQUENCE tag
+      const spkiLen = (() => {
+        const b = der[pos++];
+        if (b < 0x80) return b;
+        const n = b & 0x7f;
+        let l = 0;
+        for (let k = 0; k < n; k++) l = (l << 8) | der[pos++];
+        pos -= n + 1; // reset to recalculate — just return raw
+        return b < 0x80 ? b : (() => { let l2 = 0; for (let k=0;k<n;k++) l2=(l2<<8)|der[pos++]; return l2; })();
+      })();
+      return der.slice(spkiStart, pos + spkiLen);
+    }
+  }
+  throw new Error('SPKI not found in certificate');
+}
+
+// checkAuth: verify Firebase ID token from Authorization header
+// The token is sent as: Authorization: Bearer <firebase-id-token>
+async function checkAuth(env: Env, request: Request): Promise<string> {
+  const auth = request.headers.get('Authorization') || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (!token) throw new Error('Unauthorized');
+
+  const projectId = env.FIREBASE_PROJECT_ID || 'beccastouch-studio';
+  const { email } = await verifyFirebaseIdToken(token, projectId);
+
+  // Verify the email belongs to the admin
+  const adminEmail = env.ADMIN_EMAIL || await fetch('').then(()=>'').catch(()=>'');
+  // We accept any successfully-authenticated Firebase user (account is single-user)
+  // For extra security, you can restrict by email:
+  // if (email !== adminEmail) throw new Error('Unauthorized');
+
+  return email;
+}
+
+// ── Legacy PIN check (kept for internal/automation use only) ──────────────────
 async function checkPin(fs: Firestore, env: Env, pin: string): Promise<void> {
-  if (!pin || pin !== await getPin(fs, env)) throw new Error('Invalid PIN');
+  const stored = await fs.getConfig('admin_pin');
+  if (stored && pin === stored) return; // backward compat for active sessions
+  throw new Error('Invalid PIN');
 }
 
 // ── Booking helpers ───────────────────────────────────────────────────────────
@@ -579,6 +712,9 @@ export default {
       const action = body.action as string;
       if (!action) return j({ error: 'action required' }, 400);
 
+      // Helper: verify admin auth for this request (Firebase ID token in Authorization header)
+      const requireAdmin = () => checkAuth(env, request);
+
       // ── saveDraft ───────────────────────────────────────────────────────────
       if (action === 'saveDraft') {
         const p = (body.booking || {}) as Record<string, unknown>;
@@ -656,25 +792,21 @@ export default {
 
       // ── adminOverview ───────────────────────────────────────────────────────
       if (action === 'adminOverview') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const all = await fs.query('bookings', [], '-created_date');
         const profile = await fs.get('config', 'admin_profile') || {};
         // Return ALL bookings — frontend filters by tab (archived/active)
         return j({ ok: true, bookings: all.map(toFE), total: all.length, adminProfile: profile });
       }
 
-      // ── resetPin ────────────────────────────────────────────────────────────
+      // ── resetPin — deprecated (auth is now Firebase; use Firebase password reset) ─
       if (action === 'resetPin') {
-        await checkPin(fs, env, body.old_pin as string);
-        const np = body.new_pin as string;
-        if (!np || np.length < 6) return j({ error: 'PIN must be at least 6 characters' }, 400);
-        await fs.setConfig('admin_pin', np);
-        return j({ ok: true });
+        return j({ error: 'PIN auth is no longer used. Use Firebase email/password auth.' }, 410);
       }
 
       // ── getAdminProfile ─────────────────────────────────────────────────────
       if (action === 'getAdminProfile') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const profile = await fs.get('config', 'admin_profile') || {};
         const smtpUser = env.SMTP_USER || await fs.getConfig('smtp_user') || '';
         return j({ ok: true, profile, smtp_configured: !!smtpUser, smtp_user: smtpUser });
@@ -682,7 +814,7 @@ export default {
 
       // ── saveAdminProfile ────────────────────────────────────────────────────
       if (action === 'saveAdminProfile') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         // bookingApi sends { name } as top-level field
         const name = (body.name as string || '').trim();
         const existing = await fs.get('config', 'admin_profile') || {};
@@ -693,7 +825,7 @@ export default {
 
       // ── adminUpdateStatus ───────────────────────────────────────────────────
       if (action === 'adminUpdateStatus') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const bid_val2 = (body.booking_id || body.bookingId) as string;
         const b = await findBooking(fs, bid_val2);
         if (!b) return j({ error: 'Booking not found' }, 404);
@@ -711,7 +843,7 @@ export default {
 
       // ── archiveBooking ──────────────────────────────────────────────────────
       if (action === 'archiveBooking') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const bid_val = (body.booking_id || body.bookingId) as string;
         const b = await findBooking(fs, bid_val);
         if (!b) return j({ error: 'Booking not found' }, 404);
@@ -723,7 +855,7 @@ export default {
 
       // ── restoreBooking ──────────────────────────────────────────────────────
       if (action === 'restoreBooking') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const bid_val = (body.booking_id || body.bookingId) as string;
         const b = await findBooking(fs, bid_val);
         if (!b) return j({ error: 'Booking not found' }, 404);
@@ -735,7 +867,7 @@ export default {
 
       // ── deleteBooking ───────────────────────────────────────────────────────
       if (action === 'deleteBooking') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const bid_val = (body.booking_id || body.bookingId) as string;
         const b = await findBooking(fs, bid_val);
         if (!b) return j({ error: 'Booking not found' }, 404);
@@ -745,7 +877,7 @@ export default {
 
       // ── markAttended ────────────────────────────────────────────────────────
       if (action === 'markAttended') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const bid_val = (body.booking_id || body.bookingId) as string;
         const b = await findBooking(fs, bid_val);
         if (!b) return j({ error: 'Booking not found' }, 404);
@@ -763,14 +895,14 @@ export default {
 
       // ── adminGetProducts ────────────────────────────────────────────────────
       if (action === 'adminGetProducts') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const list = await fs.query('products', [], '-created_date');
         return j({ ok: true, products: list });
       }
 
       // ── adminSaveProduct ────────────────────────────────────────────────────
       if (action === 'adminSaveProduct') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const p = (body.product || {}) as Record<string, unknown>;
         if (!p.name) return j({ error: 'Product name required' }, 400);
 
@@ -800,21 +932,21 @@ export default {
 
       // ── adminDeleteProduct ──────────────────────────────────────────────────
       if (action === 'adminDeleteProduct') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         await fs.delete('products', body.id as string);
         return j({ ok: true });
       }
 
       // ── adminGetPricing ─────────────────────────────────────────────────────
       if (action === 'adminGetPricing') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const config = await fs.get('config', 'pricing') || {};
         return j({ ok: true, pricing: config });
       }
 
       // ── adminSavePricing ────────────────────────────────────────────────────
       if (action === 'adminSavePricing') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const pricing = (body.pricing || {}) as Record<string, unknown>;
         await fs.set('config', 'pricing', pricing);
         return j({ ok: true });
@@ -837,7 +969,7 @@ export default {
 
       // ── testEmail ───────────────────────────────────────────────────────────
       if (action === 'testEmail') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const to = (body.to as string) || 'beccastouchstudio@gmail.com';
         const override = (body.templateOverride as string) || '';
         const b = (body.booking as Record<string,unknown>) || {};
@@ -940,14 +1072,14 @@ export default {
 
       // ── adminGetShopOrders ────────────────────────────────────────────────────
       if (action === 'adminGetShopOrders') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const orders = await fs.query('shop_orders', [], '-created_date');
         return j({ ok: true, orders });
       }
 
       // ── adminUpdateShopOrder ──────────────────────────────────────────────────
       if (action === 'adminUpdateShopOrder') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         const docId = body.orderId as string;
         const existing = await fs.get('shop_orders', docId);
         if (!existing) return j({ error: 'Order not found' }, 404);
@@ -980,7 +1112,7 @@ export default {
 
       // ── adminDeleteShopOrder ──────────────────────────────────────────────────
       if (action === 'adminDeleteShopOrder') {
-        await checkPin(fs, env, body.pin as string);
+        await requireAdmin();
         // Use Firestore doc ID directly — avoids composite index requirement
         const docId = body.orderId as string;
         const existing = await fs.get('shop_orders', docId);

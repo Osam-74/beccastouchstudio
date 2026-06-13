@@ -10,7 +10,6 @@ var j = (data, s = 200) => new Response(JSON.stringify(data), {
 });
 var STUDIO = "Beccastouch Studio";
 var ADDRESS = "Total Filling Station, Oju-Irin Bodija, Ibadan, Oyo State";
-var DEFAULT_PIN = "12345678";
 var PHONE = "+234 802 327 4274";
 var WHATSAPP = "+234 805 198 2695";
 var RULES = [
@@ -206,11 +205,108 @@ async function sendMail(env, to, subject, html, _fs) {
     console.error("[sendMail] Exception sending to:", to, "|", e.message);
   }
 }
-async function getPin(fs, env) {
-  return await fs.getConfig("admin_pin") || env.ADMIN_PIN || DEFAULT_PIN;
+var _fbKeyCache = { keys: {}, exp: 0 };
+async function getFirebasePublicKeys() {
+  const now = Date.now();
+  if (now < _fbKeyCache.exp && Object.keys(_fbKeyCache.keys).length > 0) return _fbKeyCache.keys;
+  const res = await fetch("https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com");
+  const keys = await res.json();
+  const cc = res.headers.get("cache-control") || "";
+  const maxAgeMatch = cc.match(/max-age=(\d+)/);
+  _fbKeyCache.keys = keys;
+  _fbKeyCache.exp = now + (maxAgeMatch ? parseInt(maxAgeMatch[1]) * 1e3 : 36e5);
+  return keys;
 }
-async function checkPin(fs, env, pin) {
-  if (!pin || pin !== await getPin(fs, env)) throw new Error("Invalid PIN");
+async function verifyFirebaseIdToken(token, projectId) {
+  const parts = token.split(".");
+  if (parts.length !== 3) throw new Error("Invalid token format");
+  const header = JSON.parse(atob(parts[0].replace(/-/g, "+").replace(/_/g, "/")));
+  const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+  const now = Math.floor(Date.now() / 1e3);
+  if (payload.exp < now) throw new Error("Token expired");
+  if (payload.iat > now + 300) throw new Error("Token issued in future");
+  if (payload.aud !== projectId) throw new Error("Token audience mismatch");
+  if (!payload.sub) throw new Error("Token missing sub");
+  const keys = await getFirebasePublicKeys();
+  const certPem = keys[header.kid];
+  if (!certPem) throw new Error("Unknown key ID");
+  const pemBody = certPem.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----/g, "").replace(/\n/g, "").trim();
+  const derBytes = Uint8Array.from(atob(pemBody), (c) => c.charCodeAt(0));
+  const cryptoKey = await crypto.subtle.importKey(
+    "spki",
+    // The public key is embedded in the cert — use SubtleCrypto to import directly
+    // For Cloudflare Workers we can import X.509 cert bytes directly via spki
+    derBytes.buffer,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["verify"]
+  ).catch(async () => {
+    const spki = extractSpkiFromCert(derBytes);
+    return crypto.subtle.importKey(
+      "spki",
+      spki.buffer,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["verify"]
+    );
+  });
+  const sigBytes = Uint8Array.from(atob(parts[2].replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  const dataBytes = new TextEncoder().encode(parts[0] + "." + parts[1]);
+  const valid = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", cryptoKey, sigBytes, dataBytes);
+  if (!valid) throw new Error("Invalid token signature");
+  return { uid: payload.sub, email: payload.email || "" };
+}
+function extractSpkiFromCert(der) {
+  let offset = 0;
+  function readLen() {
+    const b = der[offset++];
+    if (b < 128) return b;
+    const n = b & 127;
+    let len = 0;
+    for (let i = 0; i < n; i++) len = len << 8 | der[offset++];
+    return len;
+  }
+  function skipTag() {
+    offset++;
+    return readLen();
+  }
+  offset++;
+  readLen();
+  const tbsLen = skipTag();
+  const tbsEnd = offset + tbsLen;
+  const rsaOid = [42, 134, 72, 134, 247, 13, 1, 1, 1];
+  for (let i = offset; i < tbsEnd - rsaOid.length; i++) {
+    if (rsaOid.every((b, j2) => der[i + j2] === b)) {
+      let spkiStart = i - 4;
+      while (spkiStart > 0 && der[spkiStart] !== 48) spkiStart--;
+      let pos = spkiStart;
+      pos++;
+      const spkiLen = (() => {
+        const b = der[pos++];
+        if (b < 128) return b;
+        const n = b & 127;
+        let l = 0;
+        for (let k = 0; k < n; k++) l = l << 8 | der[pos++];
+        pos -= n + 1;
+        return b < 128 ? b : (() => {
+          let l2 = 0;
+          for (let k = 0; k < n; k++) l2 = l2 << 8 | der[pos++];
+          return l2;
+        })();
+      })();
+      return der.slice(spkiStart, pos + spkiLen);
+    }
+  }
+  throw new Error("SPKI not found in certificate");
+}
+async function checkAuth(env, request) {
+  const auth = request.headers.get("Authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!token) throw new Error("Unauthorized");
+  const projectId = env.FIREBASE_PROJECT_ID || "beccastouch-studio";
+  const { email } = await verifyFirebaseIdToken(token, projectId);
+  const adminEmail = env.ADMIN_EMAIL || await fetch("").then(() => "").catch(() => "");
+  return email;
 }
 function bid(bookingType) {
   const prefix = bookingType === "glam" ? "GLM" : bookingType === "studio" ? "STU" : "BK";
@@ -445,6 +541,7 @@ var worker_default = {
       const body = await request.json().catch(() => ({}));
       const action = body.action;
       if (!action) return j({ error: "action required" }, 400);
+      const requireAdmin = () => checkAuth(env, request);
       if (action === "saveDraft") {
         const p = body.booking || {};
         if (!p.booking_type) return j({ error: "booking_type required" }, 400);
@@ -498,26 +595,22 @@ var worker_default = {
         return j({ ok: true, bookings: hits.map(toFE) });
       }
       if (action === "adminOverview") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const all = await fs.query("bookings", [], "-created_date");
         const profile = await fs.get("config", "admin_profile") || {};
         return j({ ok: true, bookings: all.map(toFE), total: all.length, adminProfile: profile });
       }
       if (action === "resetPin") {
-        await checkPin(fs, env, body.old_pin);
-        const np = body.new_pin;
-        if (!np || np.length < 6) return j({ error: "PIN must be at least 6 characters" }, 400);
-        await fs.setConfig("admin_pin", np);
-        return j({ ok: true });
+        return j({ error: "PIN auth is no longer used. Use Firebase email/password auth." }, 410);
       }
       if (action === "getAdminProfile") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const profile = await fs.get("config", "admin_profile") || {};
         const smtpUser = env.SMTP_USER || await fs.getConfig("smtp_user") || "";
         return j({ ok: true, profile, smtp_configured: !!smtpUser, smtp_user: smtpUser });
       }
       if (action === "saveAdminProfile") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const name = (body.name || "").trim();
         const existing = await fs.get("config", "admin_profile") || {};
         const p = { ...existing, name };
@@ -525,7 +618,7 @@ var worker_default = {
         return j({ ok: true, profile: p });
       }
       if (action === "adminUpdateStatus") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const bid_val2 = body.booking_id || body.bookingId;
         const b = await findBooking(fs, bid_val2);
         if (!b) return j({ error: "Booking not found" }, 404);
@@ -549,7 +642,7 @@ var worker_default = {
         return j({ ok: true, booking: toFE(updated) });
       }
       if (action === "archiveBooking") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const bid_val = body.booking_id || body.bookingId;
         const b = await findBooking(fs, bid_val);
         if (!b) return j({ error: "Booking not found" }, 404);
@@ -561,7 +654,7 @@ var worker_default = {
         return j({ ok: true, booking: toFE(updated) });
       }
       if (action === "restoreBooking") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const bid_val = body.booking_id || body.bookingId;
         const b = await findBooking(fs, bid_val);
         if (!b) return j({ error: "Booking not found" }, 404);
@@ -573,7 +666,7 @@ var worker_default = {
         return j({ ok: true, booking: toFE(updated) });
       }
       if (action === "deleteBooking") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const bid_val = body.booking_id || body.bookingId;
         const b = await findBooking(fs, bid_val);
         if (!b) return j({ error: "Booking not found" }, 404);
@@ -581,7 +674,7 @@ var worker_default = {
         return j({ ok: true, deleted: bid_val });
       }
       if (action === "markAttended") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const bid_val = body.booking_id || body.bookingId;
         const b = await findBooking(fs, bid_val);
         if (!b) return j({ error: "Booking not found" }, 404);
@@ -597,12 +690,12 @@ var worker_default = {
         return j({ ok: true, products: list.filter((p) => !p.is_archived) });
       }
       if (action === "adminGetProducts") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const list = await fs.query("products", [], "-created_date");
         return j({ ok: true, products: list });
       }
       if (action === "adminSaveProduct") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const p = body.product || {};
         if (!p.name) return j({ error: "Product name required" }, 400);
         const cleanImage = (v) => {
@@ -625,17 +718,17 @@ var worker_default = {
         return j({ ok: true, product: saved });
       }
       if (action === "adminDeleteProduct") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         await fs.delete("products", body.id);
         return j({ ok: true });
       }
       if (action === "adminGetPricing") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const config = await fs.get("config", "pricing") || {};
         return j({ ok: true, pricing: config });
       }
       if (action === "adminSavePricing") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const pricing = body.pricing || {};
         await fs.set("config", "pricing", pricing);
         return j({ ok: true });
@@ -650,7 +743,7 @@ var worker_default = {
         return j({ ok: true, connected: true, message: "Email uses Base44 Gmail relay." });
       }
       if (action === "testEmail") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const to = body.to || "beccastouchstudio@gmail.com";
         const override = body.templateOverride || "";
         const b = body.booking || {};
@@ -742,12 +835,12 @@ var worker_default = {
         return j({ ok: true, orderId, order: saved });
       }
       if (action === "adminGetShopOrders") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const orders = await fs.query("shop_orders", [], "-created_date");
         return j({ ok: true, orders });
       }
       if (action === "adminUpdateShopOrder") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const docId = body.orderId;
         const existing = await fs.get("shop_orders", docId);
         if (!existing) return j({ error: "Order not found" }, 404);
@@ -779,7 +872,7 @@ var worker_default = {
         return j({ ok: true, order: updated });
       }
       if (action === "adminDeleteShopOrder") {
-        await checkPin(fs, env, body.pin);
+        await requireAdmin();
         const docId = body.orderId;
         const existing = await fs.get("shop_orders", docId);
         if (!existing) return j({ error: "Order not found" }, 404);

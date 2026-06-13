@@ -9,7 +9,7 @@ const CATS = ['Makeup', 'Skincare', 'Hair', 'Tools & Accessories', 'Bundles', 'O
 
 const EMPTY = { name:'', description:'', price:'', sale_price:'', category:'Makeup', in_stock:true, image_url:'', images:[], whatsapp_order:true, is_archived:false };
 
-export default function AdminShopTab({ pin }) {
+export default function AdminShopTab({ pin, idToken, getFreshToken }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
@@ -22,8 +22,13 @@ export default function AdminShopTab({ pin }) {
   // track total size of uploaded file-based images (base64 bytes)
   const { showToast } = useToast();
 
+  async function tok() {
+    if (!getFreshToken) return idToken || '';
+    return getFreshToken().catch(() => idToken || '');
+  }
+
   async function load() {
-    try { setLoading(true); const { products: list } = await bookingApi.adminGetProducts(pin); setProducts(list || []); }
+    try { setLoading(true); const { products: list } = await bookingApi.adminGetProducts(pin, await tok()); setProducts(list || []); }
     catch(e) { showToast(e.message,'error'); } finally { setLoading(false); }
   }
 
@@ -90,12 +95,12 @@ export default function AdminShopTab({ pin }) {
     if (!form.name.trim()) return showToast('Product name is required.','error');
     try {
       setSaving(true);
-      const { product } = await bookingApi.adminSaveProduct(pin, {
+      const t = await tok(); const { product } = await bookingApi.adminSaveProduct(pin, {
         ...form,
         price: parseFloat(form.price)||0,
         images: imgPreviews,
         image_url: imgPreviews[0] || form.image_url || '',
-      });
+      }, t);
       setProducts(prev => form.id ? prev.map(p => p.id===product.id ? product : p) : [product, ...prev]);
       showToast(form.id ? 'Product updated.' : 'Product added.','success');
       cancel();
@@ -104,7 +109,7 @@ export default function AdminShopTab({ pin }) {
 
   async function toggleArchive(p) {
     try {
-      const { product } = await bookingApi.adminSaveProduct(pin, { ...p, is_archived: !p.is_archived });
+      const t = await tok(); const { product } = await bookingApi.adminSaveProduct(pin, { ...p, is_archived: !p.is_archived }, await tok());
       setProducts(prev => prev.map(x => x.id===product.id ? product : x));
       showToast(product.is_archived ? 'Product hidden from shop.' : 'Product restored.','success');
     } catch(e) { showToast(e.message,'error'); }
@@ -113,7 +118,7 @@ export default function AdminShopTab({ pin }) {
   async function del(p) {
     if (!window.confirm(`Delete "${p.name}"? This cannot be undone.`)) return;
     try {
-      await bookingApi.adminDeleteProduct(pin, p.id);
+      await bookingApi.adminDeleteProduct(pin, p.id, await tok());
       setProducts(prev => prev.filter(x => x.id !== p.id));
       showToast('Deleted.','success');
     } catch(e) { showToast(e.message,'error'); }

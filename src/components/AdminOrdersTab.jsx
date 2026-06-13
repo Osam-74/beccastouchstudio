@@ -118,7 +118,7 @@ function OrderModal({ order, onClose, onUpdateStatus, onDelete, updating }) {
   );
 }
 
-export default function AdminOrdersTab({ pin }) {
+export default function AdminOrdersTab({ pin, idToken, getFreshToken }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
@@ -126,10 +126,15 @@ export default function AdminOrdersTab({ pin }) {
   const [updating, setUpdating] = useState('');
   const { showToast } = useToast();
 
+  async function tok() {
+    if (!getFreshToken) return idToken || '';
+    return getFreshToken().catch(() => idToken || '');
+  }
+
   async function load() {
     try {
       setLoading(true);
-      const { orders: list } = await bookingApi.adminGetShopOrders(pin);
+      const { orders: list } = await bookingApi.adminGetShopOrders(pin, await tok());
       // Auto-mark new orders as viewed when admin loads them
       setOrders(list || []);
     } catch(e) { showToast(e.message, 'error'); }
@@ -140,7 +145,7 @@ export default function AdminOrdersTab({ pin }) {
   async function updateStatus(docId, status) {
     try {
       setUpdating(docId);
-      await bookingApi.adminUpdateShopOrder(pin, docId, status, '');
+      await bookingApi.adminUpdateShopOrder(pin, docId, status, '', await tok());
       setOrders(prev => prev.map(o => o.id === docId ? { ...o, status } : o));
       if (selectedOrder?.id === docId) setSelectedOrder(p => ({ ...p, status }));
       showToast(`Order marked as ${status}.`, 'success');
@@ -151,7 +156,7 @@ export default function AdminOrdersTab({ pin }) {
   async function del(docId) {
     if (!window.confirm('Delete this order permanently?')) return;
     try {
-      await bookingApi.adminDeleteShopOrder(pin, docId);
+      await bookingApi.adminDeleteShopOrder(pin, docId, await tok());
       setOrders(prev => prev.filter(o => o.id !== docId));
       if (selectedOrder?.id === docId) setSelectedOrder(null);
       showToast('Order deleted.', 'success');

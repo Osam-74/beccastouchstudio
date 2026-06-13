@@ -58,7 +58,7 @@ const PRICING_SCHEMA = [
   },
 ];
 
-export default function AdminPricingTab({ pin }) {
+export default function AdminPricingTab({ pin, idToken, getFreshToken }) {
   const [values,   setValues]   = useState({});
   const [saved,    setSaved]    = useState({});
   const [loading,  setLoading]  = useState(true);
@@ -69,7 +69,7 @@ export default function AdminPricingTab({ pin }) {
   async function load() {
     try {
       setLoading(true);
-      const { pricing } = await bookingApi.adminGetPricing(pin);
+      const { pricing } = await bookingApi.adminGetPricing(pin, await tok());
       const init = {};
       PRICING_SCHEMA.forEach(s => s.fields.forEach(f => {
         init[f.key] = pricing[f.key] !== undefined ? pricing[f.key] : String(f.default);
@@ -77,6 +77,11 @@ export default function AdminPricingTab({ pin }) {
       setValues(init); setSaved({ ...init }); setDirty({});
     } catch (e) { showToast(e.message, 'error'); }
     finally { setLoading(false); }
+  }
+
+  async function tok() {
+    if (!getFreshToken) return idToken || '';
+    return getFreshToken().catch(() => idToken || '');
   }
 
   useEffect(() => { load(); }, []);
@@ -89,7 +94,7 @@ export default function AdminPricingTab({ pin }) {
   async function saveSingle(key) {
     try {
       setSavingKey(key);
-      await bookingApi.adminSavePricing(pin, key, values[key]);
+      await bookingApi.adminSavePricing(pin, key, values[key], await tok());
       setSaved(p => ({ ...p, [key]: values[key] }));
       setDirty(p  => ({ ...p, [key]: false }));
       showToast('Price saved.', 'success');

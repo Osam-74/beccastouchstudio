@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { signOut, onAuthStateChanged } from 'firebase/auth';
+import { firebaseAuth } from '../lib/firebase';
+import AdminLogin from './AdminLogin';
 import { format, parseISO, startOfWeek, addDays, isSameDay } from 'date-fns';
 import {
   RefreshCw, Search, X, Archive, ArchiveRestore,
@@ -45,103 +48,7 @@ function groupByDate(list) {
   return [...m.entries()].sort(([a],[b])=>a.localeCompare(b));
 }
 
-/* ─── pin screen ─── */
-function PinScreen({ onUnlock }) {
-  const [digits, setDigits] = useState('');
-  const [shake, setShake]   = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [cachedName, setCachedName] = useState(() => localStorage.getItem('beccastouch_admin_name') || '');
-  const { showToast } = useToast();
 
-  useEffect(() => {
-    // Pre-fetch admin name from backend so it shows on the lock screen
-    bookingApi.getAdminProfile().then(d => {
-      const n = d?.adminProfile?.name || '';
-      if (n && n !== 'Admin') { setCachedName(n); localStorage.setItem('beccastouch_admin_name', n); }
-    }).catch(() => {});
-  }, []);
-
-  // Immediately add digit — no glow delay
-  function press(d) {
-    if (digits.length >= 8 || loading) return;
-    const next = digits + d;
-    setDigits(next);
-    if (next.length === 8) verify(next);
-  }
-  function del() { if (!loading) setDigits(p => p.slice(0,-1)); }
-
-  async function verify(pin) {
-    try {
-      setLoading(true);
-      await bookingApi.adminOverview(pin);
-      sessionStorage.setItem('beccastouch_admin_pin', pin);
-      onUnlock(pin);
-    } catch {
-      setShake(true);
-      setDigits('');
-      showToast('Wrong PIN','error');
-      setTimeout(() => setShake(false), 500);
-    } finally { setLoading(false); }
-  }
-
-  return (
-    <div className="min-h-screen flex items-center justify-center px-5 overflow-hidden"
-      style={{ background:'linear-gradient(135deg,#fdf2f5 0%,#f8e0e8 40%,#fdf0ec 100%)' }}>
-
-      <div className="relative w-full max-w-[320px] rounded-[32px] p-6"
-        style={{
-          background:'rgba(255,255,255,0.72)',
-          backdropFilter:'blur(24px)',
-          WebkitBackdropFilter:'blur(24px)',
-          border:'1.5px solid rgba(220,160,175,0.45)',
-          boxShadow:'0 8px 60px rgba(180,80,110,0.14)',
-        }}>
-
-        <div className="text-center mb-6">
-          <h1 className="font-display text-2xl text-[#3d1f6e] mb-1">Welcome{cachedName ? `, ${cachedName}` : ''} 👋</h1>
-          <p className="text-sm text-[#9a6070]">Enter your PIN to continue</p>
-        </div>
-
-        {/* Asterisk display — shows only entered chars, no hint of total length */}
-        <div className={`flex items-center justify-center gap-1.5 mb-7 min-h-[28px] ${shake ? 'animate-[pinShake_0.4s_ease]' : ''}`}>
-          {digits.length === 0 ? (
-            <span className="text-[#e0c4cc] text-xs tracking-widest select-none">● ● ●</span>
-          ) : (
-            Array.from({ length: digits.length }, (_, i) => (
-              <span key={i} className="text-[#c8788a] text-2xl leading-none font-black select-none" style={{lineHeight:1}}>✱</span>
-            ))
-          )}
-        </div>
-
-        {/* Keypad */}
-        <div className="grid grid-cols-3 gap-3 mb-3">
-          {[1,2,3,4,5,6,7,8,9].map(d => (
-            <button key={d} type="button"
-              onPointerDown={e => { e.preventDefault(); press(String(d)); }}
-              disabled={loading}
-              className="h-14 rounded-full bg-white/70 border border-[#eecdd4] shadow-sm text-[#3d1f6e] text-lg font-bold active:scale-90 active:bg-[linear-gradient(135deg,#c8788a,#e4a0b0)] active:text-white active:border-transparent transition-transform disabled:opacity-50">
-              {d}
-            </button>
-          ))}
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <button type="button" onPointerDown={e => { e.preventDefault(); del(); }} disabled={loading}
-            className="h-14 rounded-full bg-white/70 border border-[#eecdd4] shadow-sm text-[#9a6070] text-sm font-semibold active:scale-90 transition-transform disabled:opacity-50">
-            ⌫
-          </button>
-          <button type="button" onPointerDown={e => { e.preventDefault(); press('0'); }} disabled={loading}
-            className="h-14 rounded-full bg-white/70 border border-[#eecdd4] shadow-sm text-[#3d1f6e] text-lg font-bold active:scale-90 active:bg-[linear-gradient(135deg,#c8788a,#e4a0b0)] active:text-white active:border-transparent transition-transform disabled:opacity-50">
-            0
-          </button>
-          <div/>
-        </div>
-
-        {loading && <p className="text-center text-xs text-[#9a6070] mt-4 animate-pulse">Verifying…</p>}
-      </div>
-      <style>{`@keyframes pinShake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}`}</style>
-    </div>
-  );
-}
 
 /* ─── admin FAB ─── */
 function AdminFab({ activeTab, setActiveTab }) {
@@ -654,7 +561,7 @@ function EmailSetupPanel({ pin }) {
   async function testEmail() {
     try {
       setTesting(true);
-      await bookingApi.testEmail(pin);
+      await api('testEmail');
       showToast('Test email sent to beccastouchstudio@gmail.com ✓', 'success');
     } catch(e) { showToast(e.message, 'error'); }
     finally { setTesting(false); }
@@ -677,35 +584,21 @@ function EmailSetupPanel({ pin }) {
 }
 
 /* ─── settings tab ─── */
-function SettingsTab({ pin, adminProfile, onProfileSaved }) {
-  const [curPin, setCurPin] = useState('');
-  const [newPin, setNewPin] = useState('');
-  const [savingPin, setSavingPin] = useState(false);
+function SettingsTab({ pin, idToken, getFreshToken, adminProfile, onProfileSaved, logout }) {
+
   const [adminName, setAdminName] = useState(adminProfile?.name || 'Admin');
   const [savingProfile, setSavingProfile] = useState(false);
   // Keep adminName in sync when adminProfile prop updates (e.g. after data loads)
   useEffect(() => { if (adminProfile?.name) setAdminName(adminProfile.name); }, [adminProfile?.name]);
   const { showToast } = useToast();
 
-  async function changePin() {
-    if (!curPin.trim()) return showToast('Enter your current PIN.', 'error');
-    if (newPin.length < 4) return showToast('New PIN must be at least 4 digits.', 'error');
-    if (!/^\d+$/.test(newPin)) return showToast('PIN must contain numbers only.', 'error');
-    if (newPin === curPin) return showToast('New PIN must be different from current PIN.', 'error');
-    try {
-      setSavingPin(true);
-      await bookingApi.resetPin(curPin, newPin);
-      sessionStorage.setItem('beccastouch_admin_pin', newPin);
-      showToast('PIN updated successfully! Use your new PIN next time.', 'success');
-      setCurPin(''); setNewPin('');
-    } catch(e) { showToast(e.message || 'Failed to update PIN. Check your current PIN is correct.', 'error'); } finally { setSavingPin(false); }
-  }
+
 
   async function saveProfile() {
     if (!adminName.trim()) return showToast('Name cannot be empty.', 'error');
     try {
       setSavingProfile(true);
-      await bookingApi.saveAdminProfile(pin, adminName.trim());
+      const t = await getFreshToken().catch(() => idToken); await bookingApi.saveAdminProfile(pin, adminName.trim(), t);
       onProfileSaved(adminName.trim());
       showToast('Profile saved.', 'success');
     } catch(e) { showToast(e.message, 'error'); } finally { setSavingProfile(false); }
@@ -729,14 +622,13 @@ function SettingsTab({ pin, adminProfile, onProfileSaved }) {
       </div>
       {/* Gmail email setup */}
       <EmailSetupPanel pin={pin}/>
-      {/* Change PIN */}
+      {/* Password change — now handled via Firebase */}
       <div className="rose-card p-6">
-        <p className="font-semibold text-[#3d1f6e] mb-4">Change admin PIN</p>
-        <div className="space-y-3">
-          <div><label className="label-text">Current PIN</label><input type="password" inputMode="numeric" pattern="[0-9]*" value={curPin} onChange={e=>setCurPin(e.target.value.replace(/\D/g,''))} maxLength={8} className="input-field" placeholder="Current PIN"/></div>
-          <div><label className="label-text">New PIN (numbers only)</label><input type="password" inputMode="numeric" pattern="[0-9]*" value={newPin} onChange={e=>setNewPin(e.target.value.replace(/\D/g,''))} maxLength={8} className="input-field" placeholder="New PIN (min 4 digits)"/></div>
-          <button type="button" onClick={changePin} disabled={savingPin||!curPin||!newPin} className="btn-rose">{savingPin?'Saving…':'Update PIN'}</button>
-        </div>
+        <p className="font-semibold text-[#3d1f6e] mb-1">Change password</p>
+        <p className="text-xs text-[#9a7080] mb-4">Your admin account now uses email and password (not a PIN). To change your password, log out and click <b>Forgot password?</b> on the login screen.</p>
+        <button type="button" onClick={logout} className="btn-outline-dark text-sm">
+          Log out &amp; reset password
+        </button>
       </div>
     </div>
   );
@@ -744,7 +636,12 @@ function SettingsTab({ pin, adminProfile, onProfileSaved }) {
 
 /* ─── main admin ─── */
 export default function Admin() {
-  const [pin, setPin]     = useState(() => sessionStorage.getItem('beccastouch_admin_pin') || '');
+  const [idToken, setIdToken]   = useState(() => sessionStorage.getItem('beccastouch_admin_token') || '');
+  const [adminEmail, setAdminEmail] = useState(() => sessionStorage.getItem('beccastouch_admin_email') || '');
+  // Keep a stable "pin" alias so all existing bookingApi calls continue to work
+  // bookingApi still sends { pin } in body; the worker now ignores it and checks
+  // the Authorization header instead. We pass a placeholder pin.
+  const pin = '__firebase_auth__';
   const [adminProfile, setAdminProfile] = useState({ name: 'Admin' });
   const [bookings, setBookings] = useState([]);
   const [stats, setStats] = useState({ today:0, thisWeek:0, pending:0 });
@@ -761,50 +658,78 @@ export default function Admin() {
   const { showToast } = useToast();
   const refreshTimer = useRef(null);
 
+  // Get a fresh Firebase ID token (auto-refreshed by Firebase SDK)
+  async function getFreshToken() {
+    const user = firebaseAuth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const fresh = await user.getIdToken();
+    sessionStorage.setItem('beccastouch_admin_token', fresh);
+    setIdToken(fresh);
+    return fresh;
+  }
+
+  // Wrapper: gets fresh token and calls bookingApi with it
+  const api = async (method, ...args) => {
+    const tok = await getFreshToken().catch(() => idToken);
+    return bookingApi[method](pin, ...args, tok);
+  };
+
   const load = useCallback(async () => {
-    if (!pin) return;
+    if (!idToken) return;
     try {
       setRefreshing(true);
-      const data = await bookingApi.adminOverview(pin);
+      const tok = await getFreshToken().catch(() => idToken);
+      const data = await bookingApi.adminOverview(pin, tok);
       setBookings(data.bookings || []); setStats(data.stats || {});
       if (data.adminProfile) setAdminProfile(data.adminProfile);
-      sessionStorage.setItem('beccastouch_admin_pin', pin);
       // Load shop orders count for dashboard metric
       try {
-        const { orders: shopOrds } = await bookingApi.adminGetShopOrders(pin);
+        const { orders: shopOrds } = await bookingApi.adminGetShopOrders(pin, tok);
         setShopOrderCount((shopOrds || []).filter(o => o.status === 'pending').length);
       } catch(_) {}
-    } catch(e) { showToast(e.message,'error'); sessionStorage.removeItem('beccastouch_admin_pin'); setPin(''); }
+    } catch(e) {
+      showToast(e.message,'error');
+      if (e.message === 'Unauthorized' || e.message === 'Not authenticated') {
+        sessionStorage.removeItem('beccastouch_admin_token');
+        sessionStorage.removeItem('beccastouch_admin_email');
+        setIdToken('');
+        signOut(firebaseAuth).catch(()=>{});
+      }
+    }
     finally { setRefreshing(false); }
-  }, [pin]);
+  }, [idToken]);
 
   useEffect(() => { load(); }, [load]);
   // Store pin in a ref so the interval always uses the latest value without re-creating
-  const pinRef = useRef(pin);
-  useEffect(() => { pinRef.current = pin; }, [pin]);
+  const pinRef = useRef(idToken);
+  useEffect(() => { pinRef.current = idToken; }, [idToken]);
   useEffect(() => {
-    if (!pin) return;
+    if (!idToken) return;
     refreshTimer.current = setInterval(async () => {
-      // Use pinRef.current so a PIN change doesn't trigger 401 logout
-      if (!pinRef.current) return;
+      if (!firebaseAuth.currentUser) return;
       try {
-        const data = await bookingApi.adminOverview(pinRef.current);
+        const tok = await firebaseAuth.currentUser.getIdToken();
+        const data = await bookingApi.adminOverview(pin, tok);
         setBookings(data.bookings || []); setStats(data.stats || {});
         if (data.adminProfile) setAdminProfile(data.adminProfile);
-        // Sync sessionStorage in case it drifted
-        sessionStorage.setItem('beccastouch_admin_pin', pinRef.current);
       } catch(e) {
-        // Only log out on explicit auth failure, not transient errors
-        if (e.message === 'Invalid PIN') {
-          sessionStorage.removeItem('beccastouch_admin_pin');
-          setPin('');
+        if (e.message === 'Unauthorized') {
+          sessionStorage.removeItem('beccastouch_admin_token');
+          setIdToken('');
+          signOut(firebaseAuth).catch(()=>{});
         }
       }
-    }, 60000); // 60s instead of 45s — less aggressive
+    }, 60000);
     return () => clearInterval(refreshTimer.current);
-  }, [pin]);
+  }, [idToken]);
 
-  function logout() { sessionStorage.removeItem('beccastouch_admin_pin'); setPin(''); }
+  function logout() {
+    sessionStorage.removeItem('beccastouch_admin_token');
+    sessionStorage.removeItem('beccastouch_admin_email');
+    setIdToken('');
+    setAdminEmail('');
+    signOut(firebaseAuth).catch(()=>{});
+  }
 
   const counts = useMemo(() => ({
     total:     bookings.filter(b=>!b.isArchived).length,
@@ -854,15 +779,15 @@ export default function Admin() {
   function syncLocal(u) { setBookings(prev=>prev.map(b=>b.bookingId===u.bookingId?u:b)); setSelectedId(u.bookingId); setNote(u.adminNote||''); setRejectionReason(''); setSheetOpen(false); }
 
   async function updateStatus(bookingId, status, adminNote='', rejReason='') {
-    try { setLoadingId(bookingId); const {booking:u} = await bookingApi.adminUpdateStatus(pin,bookingId,status,adminNote,rejReason); syncLocal(u); showToast(`Booking ${status}.`,'success'); setRejectionReason(''); }
+    try { setLoadingId(bookingId); const {booking:u} = await api('adminUpdateStatus',bookingId,status,adminNote,rejReason); syncLocal(u); showToast(`Booking ${status}.`,'success'); setRejectionReason(''); }
     catch(e) { showToast(e.message,'error'); } finally { setLoadingId(''); }
   }
   async function archiveBooking(bookingId) {
-    try { setLoadingId(bookingId); const {booking:u} = await bookingApi.archiveBooking(pin,bookingId); syncLocal(u); showToast('Archived.','success'); }
+    try { setLoadingId(bookingId); const {booking:u} = await api('archiveBooking',bookingId); syncLocal(u); showToast('Archived.','success'); }
     catch(e) { showToast(e.message,'error'); } finally { setLoadingId(''); }
   }
   async function restoreBooking(bookingId) {
-    try { setLoadingId(bookingId); const {booking:u} = await bookingApi.restoreBooking(pin,bookingId); syncLocal(u); showToast('Restored.','success'); }
+    try { setLoadingId(bookingId); const {booking:u} = await api('restoreBooking',bookingId); syncLocal(u); showToast('Restored.','success'); }
     catch(e) { showToast(e.message,'error'); } finally { setLoadingId(''); }
   }
   async function deleteUser(user) {
@@ -874,7 +799,7 @@ export default function Admin() {
       // Sequential deletes to avoid Firestore race conditions
       let deleted = 0;
       for (const b of user.bookings) {
-        try { await bookingApi.deleteBooking(pin, b.bookingId); deleted++; }
+        try { await api('deleteBooking', b.bookingId); deleted++; }
         catch(e) { console.warn('Failed to delete booking', b.bookingId, e.message); }
       }
       setBookings(prev => prev.filter(b => b.email !== user.email || (!user.email && b.phone !== user.phone)));
@@ -885,7 +810,7 @@ export default function Admin() {
     if (!window.confirm(`Permanently delete booking for "${clientName}"?\n\nThis cannot be undone.`)) return;
     try {
       setLoadingId(bookingId);
-      await bookingApi.deleteBooking(pin, bookingId);
+      await api('deleteBooking', bookingId);
       setBookings(prev => prev.filter(b => b.bookingId !== bookingId));
       setSheetOpen(false); setSelectedId('');
       showToast('Booking deleted permanently.','success');
@@ -894,13 +819,21 @@ export default function Admin() {
   async function markAttended(bookingId) {
     try {
       setLoadingId(bookingId);
-      const { booking: u } = await bookingApi.markAttended(pin, bookingId);
+      const { booking: u } = await api('markAttended', bookingId);
       setBookings(prev => prev.map(b => b.bookingId === u.bookingId ? u : b));
       showToast('Marked as attended ✓', 'success');
     } catch(e) { showToast(e.message,'error'); } finally { setLoadingId(''); }
   }
 
-  if (!pin) return <PinScreen onUnlock={setPin}/>;
+  // Handle login: store token and email
+  function handleLogin(token, email) {
+    sessionStorage.setItem('beccastouch_admin_token', token);
+    sessionStorage.setItem('beccastouch_admin_email', email || '');
+    setIdToken(token);
+    setAdminEmail(email || '');
+  }
+
+  if (!idToken) return <AdminLogin onLogin={handleLogin}/>;
 
   /* stat gradient cards */
   const statCards = [
@@ -1094,14 +1027,14 @@ export default function Admin() {
           {activeTab==='users' && <UsersTab bookings={bookings} onDeleteUser={deleteUser}/>}
 
           {/* ── SETTINGS TAB ── */}
-          {activeTab==='settings' && <SettingsTab pin={pin} adminProfile={adminProfile} onProfileSaved={name=>setAdminProfile(p=>({...p,name}))}/>}
+          {activeTab==='settings' && <SettingsTab pin={pin} idToken={idToken} getFreshToken={getFreshToken} adminProfile={adminProfile} onProfileSaved={name=>setAdminProfile(p=>({...p,name}))} logout={logout}/>}
 
           {/* ── SHOP TAB ── */}
-          {activeTab==='shop' && <AdminShopTab pin={pin}/>}
-          {activeTab==='orders' && <AdminOrdersTab pin={pin}/>}
+          {activeTab==='shop' && <AdminShopTab pin={pin} idToken={idToken} getFreshToken={getFreshToken}/>}
+          {activeTab==='orders' && <AdminOrdersTab pin={pin} idToken={idToken} getFreshToken={getFreshToken}/>}
 
           {/* ── PRICING TAB ── */}
-          {activeTab==='pricing' && <AdminPricingTab pin={pin}/>}
+          {activeTab==='pricing' && <AdminPricingTab pin={pin} idToken={idToken} getFreshToken={getFreshToken}/>}
         </div>
       </div>
 
