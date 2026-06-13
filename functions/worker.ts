@@ -276,103 +276,19 @@ async function getFirebasePublicKeys(): Promise<Record<string,string>> {
 }
 
 async function verifyFirebaseIdToken(token: string, projectId: string): Promise<{ uid: string; email: string }> {
-  // Decode header to get kid
-  const parts = token.split('.');
-  if (parts.length !== 3) throw new Error('Invalid token format');
-  const header = JSON.parse(atob(parts[0].replace(/-/g,'+').replace(/_/g,'/')));
-  const payload = JSON.parse(atob(parts[1].replace(/-/g,'+').replace(/_/g,'/')));
-
-  // Verify claims
+  // Use Google's tokeninfo endpoint — no fragile crypto/DER parsing needed
+  const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${token}`);
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Token verification failed: ${txt}`);
+  }
+  const info = await res.json() as Record<string, string>;
+  if (info.aud !== projectId) throw new Error(`Token audience mismatch: got ${info.aud}`);
   const now = Math.floor(Date.now() / 1000);
-  if (payload.exp < now) throw new Error('Token expired');
-  if (payload.iat > now + 300) throw new Error('Token issued in future');
-  if (payload.aud !== projectId) throw new Error('Token audience mismatch');
-  if (!payload.sub) throw new Error('Token missing sub');
-
-  // Get public key and verify signature
-  const keys = await getFirebasePublicKeys();
-  const certPem = keys[header.kid];
-  if (!certPem) throw new Error('Unknown key ID');
-
-  // Extract the public key from the X.509 certificate (DER-encoded)
-  const pemBody = certPem.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----/g, '').replace(/\n/g, '').trim();
-  const derBytes = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
-
-  // Import as SPKI (Web Crypto can extract public key from cert binary)
-  const cryptoKey = await crypto.subtle.importKey(
-    'spki',
-    // The public key is embedded in the cert — use SubtleCrypto to import directly
-    // For Cloudflare Workers we can import X.509 cert bytes directly via spki
-    derBytes.buffer,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false, ['verify']
-  ).catch(async () => {
-    // Fallback: parse DER manually to extract SubjectPublicKeyInfo
-    // X.509 structure: SEQUENCE { SEQUENCE { OID, NULL }, BIT STRING { SPKI } }
-    // For RS256 certs, extract the public key bytes from the DER
-    const spki = extractSpkiFromCert(derBytes);
-    return crypto.subtle.importKey(
-      'spki', spki.buffer,
-      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-      false, ['verify']
-    );
-  });
-
-  const sigBytes = Uint8Array.from(atob(parts[2].replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0));
-  const dataBytes = new TextEncoder().encode(parts[0] + '.' + parts[1]);
-  const valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', cryptoKey, sigBytes, dataBytes);
-  if (!valid) throw new Error('Invalid token signature');
-
-  return { uid: payload.sub, email: payload.email || '' };
+  if (Number(info.exp) < now) throw new Error('Token expired');
+  return { uid: info.sub || '', email: info.email || '' };
 }
 
-function extractSpkiFromCert(der: Uint8Array): Uint8Array {
-  // Walk the DER ASN.1 to find the SubjectPublicKeyInfo
-  // TBSCertificate contains the SPKI; we find the BIT STRING containing it
-  let offset = 0;
-  function readLen(): number {
-    const b = der[offset++];
-    if (b < 0x80) return b;
-    const n = b & 0x7f;
-    let len = 0;
-    for (let i = 0; i < n; i++) len = (len << 8) | der[offset++];
-    return len;
-  }
-  function skipTag() { offset++; return readLen(); }
-
-  // Outer SEQUENCE (Certificate)
-  offset++; readLen();
-  // TBSCertificate SEQUENCE
-  const tbsLen = skipTag();
-  const tbsEnd = offset + tbsLen;
-
-  // Skip: version (optional context [0]), serialNumber, signature alg, issuer, validity, subject
-  // then SubjectPublicKeyInfo
-  // Easier: search for the BIT STRING containing the RSA public key OID
-  // RSA OID bytes: 2A 86 48 86 F7 0D 01 01 01
-  const rsaOid = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
-  for (let i = offset; i < tbsEnd - rsaOid.length; i++) {
-    if (rsaOid.every((b, j) => der[i + j] === b)) {
-      // Found OID — walk back to the SEQUENCE tag of SubjectPublicKeyInfo
-      let spkiStart = i - 4; // SEQUENCE tag + length (approximate)
-      while (spkiStart > 0 && der[spkiStart] !== 0x30) spkiStart--;
-      // Now read the full SPKI SEQUENCE
-      let pos = spkiStart;
-      pos++; // SEQUENCE tag
-      const spkiLen = (() => {
-        const b = der[pos++];
-        if (b < 0x80) return b;
-        const n = b & 0x7f;
-        let l = 0;
-        for (let k = 0; k < n; k++) l = (l << 8) | der[pos++];
-        pos -= n + 1; // reset to recalculate — just return raw
-        return b < 0x80 ? b : (() => { let l2 = 0; for (let k=0;k<n;k++) l2=(l2<<8)|der[pos++]; return l2; })();
-      })();
-      return der.slice(spkiStart, pos + spkiLen);
-    }
-  }
-  throw new Error('SPKI not found in certificate');
-}
 
 // checkAuth: verify Firebase ID token from Authorization header
 // The token is sent as: Authorization: Bearer <firebase-id-token>

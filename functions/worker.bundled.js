@@ -205,99 +205,17 @@ async function sendMail(env, to, subject, html, _fs) {
     console.error("[sendMail] Exception sending to:", to, "|", e.message);
   }
 }
-var _fbKeyCache = { keys: {}, exp: 0 };
-async function getFirebasePublicKeys() {
-  const now = Date.now();
-  if (now < _fbKeyCache.exp && Object.keys(_fbKeyCache.keys).length > 0) return _fbKeyCache.keys;
-  const res = await fetch("https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com");
-  const keys = await res.json();
-  const cc = res.headers.get("cache-control") || "";
-  const maxAgeMatch = cc.match(/max-age=(\d+)/);
-  _fbKeyCache.keys = keys;
-  _fbKeyCache.exp = now + (maxAgeMatch ? parseInt(maxAgeMatch[1]) * 1e3 : 36e5);
-  return keys;
-}
 async function verifyFirebaseIdToken(token, projectId) {
-  const parts = token.split(".");
-  if (parts.length !== 3) throw new Error("Invalid token format");
-  const header = JSON.parse(atob(parts[0].replace(/-/g, "+").replace(/_/g, "/")));
-  const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+  const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${token}`);
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Token verification failed: ${txt}`);
+  }
+  const info = await res.json();
+  if (info.aud !== projectId) throw new Error(`Token audience mismatch: got ${info.aud}`);
   const now = Math.floor(Date.now() / 1e3);
-  if (payload.exp < now) throw new Error("Token expired");
-  if (payload.iat > now + 300) throw new Error("Token issued in future");
-  if (payload.aud !== projectId) throw new Error("Token audience mismatch");
-  if (!payload.sub) throw new Error("Token missing sub");
-  const keys = await getFirebasePublicKeys();
-  const certPem = keys[header.kid];
-  if (!certPem) throw new Error("Unknown key ID");
-  const pemBody = certPem.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----/g, "").replace(/\n/g, "").trim();
-  const derBytes = Uint8Array.from(atob(pemBody), (c) => c.charCodeAt(0));
-  const cryptoKey = await crypto.subtle.importKey(
-    "spki",
-    // The public key is embedded in the cert — use SubtleCrypto to import directly
-    // For Cloudflare Workers we can import X.509 cert bytes directly via spki
-    derBytes.buffer,
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
-    ["verify"]
-  ).catch(async () => {
-    const spki = extractSpkiFromCert(derBytes);
-    return crypto.subtle.importKey(
-      "spki",
-      spki.buffer,
-      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-      false,
-      ["verify"]
-    );
-  });
-  const sigBytes = Uint8Array.from(atob(parts[2].replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
-  const dataBytes = new TextEncoder().encode(parts[0] + "." + parts[1]);
-  const valid = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", cryptoKey, sigBytes, dataBytes);
-  if (!valid) throw new Error("Invalid token signature");
-  return { uid: payload.sub, email: payload.email || "" };
-}
-function extractSpkiFromCert(der) {
-  let offset = 0;
-  function readLen() {
-    const b = der[offset++];
-    if (b < 128) return b;
-    const n = b & 127;
-    let len = 0;
-    for (let i = 0; i < n; i++) len = len << 8 | der[offset++];
-    return len;
-  }
-  function skipTag() {
-    offset++;
-    return readLen();
-  }
-  offset++;
-  readLen();
-  const tbsLen = skipTag();
-  const tbsEnd = offset + tbsLen;
-  const rsaOid = [42, 134, 72, 134, 247, 13, 1, 1, 1];
-  for (let i = offset; i < tbsEnd - rsaOid.length; i++) {
-    if (rsaOid.every((b, j2) => der[i + j2] === b)) {
-      let spkiStart = i - 4;
-      while (spkiStart > 0 && der[spkiStart] !== 48) spkiStart--;
-      let pos = spkiStart;
-      pos++;
-      const spkiLen = (() => {
-        const b = der[pos++];
-        if (b < 128) return b;
-        const n = b & 127;
-        let l = 0;
-        for (let k = 0; k < n; k++) l = l << 8 | der[pos++];
-        pos -= n + 1;
-        return b < 128 ? b : (() => {
-          let l2 = 0;
-          for (let k = 0; k < n; k++) l2 = l2 << 8 | der[pos++];
-          return l2;
-        })();
-      })();
-      return der.slice(spkiStart, pos + spkiLen);
-    }
-  }
-  throw new Error("SPKI not found in certificate");
+  if (Number(info.exp) < now) throw new Error("Token expired");
+  return { uid: info.sub || "", email: info.email || "" };
 }
 async function checkAuth(env, request) {
   const auth = request.headers.get("Authorization") || "";
