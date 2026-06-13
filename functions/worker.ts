@@ -550,7 +550,7 @@ function tplStatusUpdate(b: Record<string,unknown>, note: string) {
   const isConfirmed = (b.status as string) === 'confirmed';
   const isRejected  = (b.status as string) === 'rejected' || (b.status as string) === 'cancelled';
   const headline = isConfirmed ? 'Booking Confirmed! 🎉' : isRejected ? 'Update on Your Booking' : 'Booking Status Updated';
-  const statusLabel = isConfirmed ? '✅ Confirmed' : isRejected ? '❌ Not confirmed' : String(b.status || '');
+  const statusLabel = isConfirmed ? '✅ Confirmed' : isRejected ? '❌ Rejected' : String(b.status || '');
   const trackUrl = `https://beccastouchstudio.vercel.app/track-booking?id=${b.booking_id}`;
   const typeLabel = bookingTypeLabel(b);
 
@@ -559,10 +559,7 @@ function tplStatusUpdate(b: Record<string,unknown>, note: string) {
     dr('Type', typeLabel) +
     (b.preferred_date ? dr('Date', b.preferred_date as string) : '') +
     (b.start_time ? dr('Time', b.start_time as string) : '') +
-    dr('Status', statusLabel) +
-    dr('Name', b.client_name as string) +
-    dr('Phone', b.phone as string) +
-    dr('Email', b.email as string);
+    dr('Status', statusLabel);
 
   const noteHtml = note ? `<div style="background:#fffbf0;border-radius:12px;border:1px solid #f0e4b8;padding:14px 18px;margin:14px 0;"><p style="margin:0;font-size:13px;color:#6a5020;">${note}</p></div>` : '';
 
@@ -588,10 +585,10 @@ function tplStatusUpdate(b: Record<string,unknown>, note: string) {
   const body = `
     <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">${headline}</h2>
     <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">Hi ${b.client_name}, here is an update on your booking.</p>
+    ${rejectedExtra}
     ${dtable(rows)}
     ${noteHtml}
     ${confirmedExtra}
-    ${rejectedExtra}
     <p style="font-size:12px;color:#9a7090;margin-top:16px;">Questions? Reply to this email or WhatsApp us on <b>${WHATSAPP}</b>.</p>`;
 
   return shell('', '', body);

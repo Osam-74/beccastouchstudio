@@ -34,6 +34,7 @@ const S_STYLE = {
   pending:   'bg-[#fff4e0] text-[#a07428] border-[#f0d898]',
   confirmed: 'bg-[#f0faf3] text-[#3d7a53] border-[#b8e0c8]',
   rejected:  'bg-[#fff0f0] text-[#a84040] border-[#f0c8c8]',
+  expired:   'bg-[#f5f0ff] text-[#6b3fa0] border-[#d4c0f0]',
 };
 function Badge({ status }) {
   return <span className={`px-2.5 py-0.5 rounded-full text-[10px] uppercase tracking-[0.18em] font-semibold border ${S_STYLE[status]||S_STYLE.pending}`}>{status}</span>;
@@ -145,8 +146,48 @@ function AdminFab({ activeTab, setActiveTab }) {
   );
 }
 
+/* ─── reject panel sub-component ─── */
+function RejectPanel({ busy, rejectionReason, setRejectionReason, onReject }) {
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} disabled={busy}
+        className="w-full py-3 rounded-[14px] border border-[#e8b0b0] text-[#b05860] font-semibold text-sm disabled:opacity-50">
+        ✕ Reject
+      </button>
+    );
+  }
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-[0.15em] text-[#a84040] font-semibold mb-1">
+        Reason for rejection <span className="text-[#9a7080] font-normal">(required)</span>
+      </p>
+      <textarea
+        value={rejectionReason}
+        onChange={e => setRejectionReason(e.target.value)}
+        className="input-field min-h-[60px] text-sm mb-2"
+        placeholder="e.g. Date not available, slot fully booked..."
+      />
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => { onReject(); setOpen(false); }}
+          disabled={busy || !rejectionReason.trim()}
+          className="flex-1 py-3 rounded-[14px] border border-[#e8b0b0] text-[#b05860] font-semibold text-sm disabled:opacity-50"
+        >
+          ✕ Confirm Reject
+        </button>
+        <button type="button" onClick={() => setOpen(false)}
+          className="px-4 py-3 rounded-[14px] border border-[#e8cad0] text-[#7a5460] font-semibold text-sm">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ─── detail panel ─── */
-function DetailPanel({ booking, note, setNote, rejectionReason, setRejectionReason, onClose, onUpdate, onArchive, onRestore, onMarkAttended, onDelete, busy }) {
+function DetailPanel({ booking, note, setNote, rejectionReason, setRejectionReason, onClose, onUpdate, onArchive, onRestore, onDelete, busy, isExpiredBooking }) {
   if (!booking) return (
     <div className="rose-card p-8 flex flex-col items-center justify-center min-h-[200px] text-sm text-[#9a7080]">
       <Ticket size={28} className="mb-3 text-[#eecdd4]"/>
@@ -163,7 +204,7 @@ function DetailPanel({ booking, note, setNote, rejectionReason, setRejectionReas
             <p className="font-mono text-xs text-[#9a7080] mt-0.5">{booking.bookingId}</p>
           </div>
           <div className="flex items-center gap-2">
-            <Badge status={booking.bookingStatus}/>
+            <Badge status={effectiveStatus ? effectiveStatus(booking) : booking.bookingStatus}/>
             {onClose && <button type="button" onClick={onClose} className="lg:hidden text-[#9a7080]"><X size={15}/></button>}
           </div>
         </div>
@@ -193,12 +234,7 @@ function DetailPanel({ booking, note, setNote, rejectionReason, setRejectionReas
                 {booking.serviceAttended ? `Attended · ${booking.attendedAt ? fmtDate(booking.attendedAt) : ''}` : 'Not yet attended'}
               </p>
             </div>
-            {!booking.serviceAttended && (
-              <button type="button" onClick={() => onMarkAttended(booking.bookingId)} disabled={busy}
-                className="text-[9px] font-semibold uppercase tracking-[0.12em] px-3 py-1.5 rounded-full bg-[linear-gradient(120deg,#c8788a,#e4a0b0)] text-white disabled:opacity-50 whitespace-nowrap">
-                Mark Attended ✓
-              </button>
-            )}
+
           </div>
         </div>
 
@@ -225,59 +261,76 @@ function DetailPanel({ booking, note, setNote, rejectionReason, setRejectionReas
 
         <textarea value={note} onChange={e=>setNote(e.target.value)} className="input-field min-h-[80px] mb-3 text-sm" placeholder="Admin note (optional, sent to client)"/>
 
-        <div className="grid gap-2.5">
-          {/* Confirm — hide if already confirmed */}
-          {booking.bookingStatus !== 'confirmed' && (
-            <button type="button" onClick={()=>onUpdate(booking.bookingId,'confirmed',note,'')} disabled={busy}
-              className="w-full py-3 rounded-[14px] bg-[#5a9e70] text-white font-semibold text-sm disabled:opacity-50">
-              {busy?'Saving…':'✓ Confirm'}
-            </button>
-          )}
-          {booking.bookingStatus !== 'rejected' && (
-            <div className="mb-3">
-              <p className="text-[10px] uppercase tracking-[0.15em] text-[#a84040] font-semibold mb-1">Rejection reason <span className="text-[#9a7080] font-normal">(required when rejecting)</span></p>
-              <textarea value={rejectionReason} onChange={e=>setRejectionReason(e.target.value)} className="input-field min-h-[60px] text-sm" placeholder="e.g. Date not available, slot fully booked..."/>
-            </div>
-          )}
-          {/* Reject — hide if already rejected */}
-          {booking.bookingStatus !== 'rejected' && (
-            <button type="button" onClick={()=>onUpdate(booking.bookingId,'rejected',note,rejectionReason)} disabled={busy}
-              className="w-full py-3 rounded-[14px] border border-[#e8b0b0] text-[#b05860] font-semibold text-sm disabled:opacity-50">
-              ✕ Reject
-            </button>
-          )}
-          {/* Back to pending — hide if already pending or draft */}
-          {booking.bookingStatus !== 'pending' && booking.bookingStatus !== 'draft' && (
-            <button type="button" onClick={()=>onUpdate(booking.bookingId,'pending',note,'')} disabled={busy}
-              className="w-full py-3 rounded-[14px] border border-[#e8cad0] text-[#7a5460] font-semibold text-sm disabled:opacity-50">
-              ↩ Back to pending
-            </button>
-          )}
-          {/* Archive/Restore/Delete */}
-          {!booking.isArchived
-            ? <button type="button" onClick={()=>onArchive(booking.bookingId)} disabled={busy}
-                className="w-full py-3 rounded-[14px] border border-[#e8cad0] text-[#7a5460] font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50">
-                <Archive size={13}/> Archive
-              </button>
-            : <div className="space-y-2">
-                <button type="button" onClick={()=>onRestore(booking.bookingId)} disabled={busy}
-                  className="w-full py-3 rounded-[14px] border border-[#e8cad0] text-[#7a5460] font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50">
-                  <ArchiveRestore size={13}/> Restore
+        {(() => {
+          const isExpired = isExpiredBooking && isExpiredBooking(booking);
+          const isRejected = booking.bookingStatus === 'rejected' || isExpired;
+          const isConfirmed = booking.bookingStatus === 'confirmed';
+          return (
+            <div className="grid gap-2.5">
+              {/* Confirm — only for non-confirmed, non-rejected, non-expired */}
+              {!isConfirmed && !isRejected && (
+                <button type="button" onClick={()=>onUpdate(booking.bookingId,'confirmed',note,'')} disabled={busy}
+                  className="w-full py-3 rounded-[14px] bg-[#5a9e70] text-white font-semibold text-sm disabled:opacity-50">
+                  {busy?'Saving…':'✓ Confirm'}
                 </button>
+              )}
+              {/* Reject — reveal textarea only when reject button clicked */}
+              {!isRejected && (
+                <RejectPanel
+                  busy={busy}
+                  rejectionReason={rejectionReason}
+                  setRejectionReason={setRejectionReason}
+                  onReject={()=>onUpdate(booking.bookingId,'rejected',note,rejectionReason)}
+                />
+              )}
+              {/* Expired notice */}
+              {isExpired && (
+                <div className="rounded-[14px] border border-[#d4c0f0] bg-[#f5f0ff] px-4 py-3 text-xs text-[#6b3fa0] font-semibold text-center">
+                  ⏰ Expired — booking date has passed
+                </div>
+              )}
+              {/* Back to pending — only for confirmed, not rejected/expired */}
+              {isConfirmed && !isRejected && (
+                <button type="button" onClick={()=>onUpdate(booking.bookingId,'pending',note,'')} disabled={busy}
+                  className="w-full py-3 rounded-[14px] border border-[#e8cad0] text-[#7a5460] font-semibold text-sm disabled:opacity-50">
+                  ↩ Back to pending
+                </button>
+              )}
+              {/* Archive/Restore/Delete — hide for rejected/expired (they only get delete) */}
+              {!isRejected && (
+                !booking.isArchived
+                  ? <button type="button" onClick={()=>onArchive(booking.bookingId)} disabled={busy}
+                      className="w-full py-3 rounded-[14px] border border-[#e8cad0] text-[#7a5460] font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+                      <Archive size={13}/> Archive
+                    </button>
+                  : <div className="space-y-2">
+                      <button type="button" onClick={()=>onRestore(booking.bookingId)} disabled={busy}
+                        className="w-full py-3 rounded-[14px] border border-[#e8cad0] text-[#7a5460] font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+                        <ArchiveRestore size={13}/> Restore
+                      </button>
+                      <button type="button" onClick={()=>onDelete(booking.bookingId, booking.clientName)} disabled={busy}
+                        className="w-full py-3 rounded-[14px] bg-[#fff0f0] border border-[#f0c8c8] text-[#b05860] font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+                        <Trash2 size={13}/> Delete forever
+                      </button>
+                    </div>
+              )}
+              {/* For rejected/expired: only show delete */}
+              {isRejected && (
                 <button type="button" onClick={()=>onDelete(booking.bookingId, booking.clientName)} disabled={busy}
                   className="w-full py-3 rounded-[14px] bg-[#fff0f0] border border-[#f0c8c8] text-[#b05860] font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50">
                   <Trash2 size={13}/> Delete forever
                 </button>
-              </div>
-          }
-        </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
 }
 
 /* ─── calendar booking detail modal ─── */
-function CalendarModal({ booking, onClose }) {
+function CalendarModal({ booking, onClose, onMarkAttended, busy }) {
   if (!booking) return null;
   const fields = [
     ['Client name', booking.clientName],
@@ -298,6 +351,7 @@ function CalendarModal({ booking, onClose }) {
     ['Notes', booking.notes || '—'],
     ['Attended', booking.serviceAttended ? `Yes · ${booking.attendedAt ? fmtDate(booking.attendedAt) : ''}` : 'Not yet'],
   ].filter(([,v]) => v && v !== '—' && v !== 'Not yet' || true);
+  const isOverdue = booking.bookingStatus === 'confirmed' && !booking.serviceAttended && booking.preferredDate && new Date(booking.preferredDate + 'T23:59:59') < new Date();
 
   return (
     <>
@@ -310,7 +364,7 @@ function CalendarModal({ booking, onClose }) {
               <p className="font-mono text-xs text-[#9a7080] mt-0.5">{booking.bookingId}</p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <Badge status={booking.bookingStatus}/>
+              <Badge status={effectiveStatus ? effectiveStatus(booking) : booking.bookingStatus}/>
               <button type="button" onClick={onClose} className="w-8 h-8 rounded-full border border-[#eecdd4] bg-white flex items-center justify-center text-[#9a7080]"><X size={14}/></button>
             </div>
           </div>
@@ -329,6 +383,20 @@ function CalendarModal({ booking, onClose }) {
               <p className="text-sm font-semibold text-[#3d7a53]">Service attended · {booking.attendedAt ? fmtDate(booking.attendedAt) : ''}</p>
             </div>
           )}
+          {/* Overdue banner — confirmed, past date, not attended */}
+          {isOverdue && !booking.serviceAttended && (
+            <div className="mt-3 flex items-center gap-2 bg-[#fff4e0] border border-[#f0d898] rounded-2xl px-4 py-2.5">
+              <Clock3 size={15} className="text-[#a07428] shrink-0"/>
+              <p className="text-sm font-semibold text-[#a07428] flex-1">Overdue — date has passed, not yet marked attended</p>
+            </div>
+          )}
+          {/* Mark Attended — only on confirmed, not yet attended */}
+          {booking.bookingStatus === 'confirmed' && !booking.serviceAttended && onMarkAttended && (
+            <button type="button" onClick={() => { onMarkAttended(booking.bookingId); onClose(); }} disabled={busy}
+              className="mt-3 w-full py-3 rounded-[14px] bg-[linear-gradient(120deg,#c8788a,#e4a0b0)] text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+              <CheckCircle2 size={14}/> Mark as Attended
+            </button>
+          )}
         </div>
       </div>
     </>
@@ -336,7 +404,7 @@ function CalendarModal({ booking, onClose }) {
 }
 
 /* ─── calendar tab ─── */
-function CalendarTab({ bookings }) {
+function CalendarTab({ bookings, onMarkAttended, loadingId }) {
   const today = new Date();
   const [weekStart, setWeekStart] = useState(startOfWeek(today, { weekStartsOn: 1 }));
   const [activeDay, setActiveDay] = useState(today);
@@ -355,7 +423,7 @@ function CalendarTab({ bookings }) {
 
   return (
     <div>
-      {modalBooking && <CalendarModal booking={modalBooking} onClose={() => setModalBooking(null)}/>}
+      {modalBooking && <CalendarModal booking={modalBooking} onClose={() => setModalBooking(null)} onMarkAttended={onMarkAttended} busy={!!loadingId}/>}
       {/* week strip */}
       <div className="flex items-center gap-2 mb-4">
         <button type="button" onClick={() => setWeekStart(d => addDays(d,-7))} className="w-8 h-8 rounded-full border border-[#eecdd4] bg-white flex items-center justify-center"><ChevronLeft size={14}/></button>
@@ -401,7 +469,7 @@ function CalendarTab({ bookings }) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-1">
                   <p className="font-semibold text-[#3d1f6e] text-sm truncate">{b.clientName}</p>
-                  <Badge status={b.bookingStatus}/>
+                  <Badge status={effectiveStatus ? effectiveStatus(b) : b.bookingStatus}/>
                 </div>
                 <p className="font-mono text-xs text-[#9a7080]">{b.bookingId}</p>
                 <p className="text-xs text-[#7a5460] mt-1">{b.summary}</p>
@@ -483,7 +551,7 @@ function UsersTab({ bookings, onDeleteUser }) {
                 <div key={b.bookingId} className="rounded-2xl bg-white/70 border border-[#eed4da] p-3">
                   <div className="flex items-center justify-between mb-1">
                     <p className="font-mono text-xs text-[#9a7080]">{b.bookingId}</p>
-                    <Badge status={b.bookingStatus}/>
+                    <Badge status={effectiveStatus ? effectiveStatus(b) : b.bookingStatus}/>
                   </div>
                   <p className="text-xs text-[#3d1f6e]">{b.summary}</p>
                   <p className="text-xs text-[#9a7080] mt-0.5">{b.preferredDate||'No date'} · {b.currency} {Number(b.totalAmount||0).toLocaleString()}</p>
@@ -532,7 +600,7 @@ function UsersTab({ bookings, onDeleteUser }) {
                     <div key={b.bookingId} className="rounded-2xl bg-white/70 border border-[#eed4da] p-3">
                       <div className="flex items-center justify-between mb-1">
                         <p className="font-mono text-xs text-[#9a7080]">{b.bookingId}</p>
-                        <Badge status={b.bookingStatus}/>
+                        <Badge status={effectiveStatus ? effectiveStatus(b) : b.bookingStatus}/>
                       </div>
                       <p className="text-xs text-[#3d1f6e]">{b.summary}</p>
                       <p className="text-xs text-[#9a7080] mt-0.5">{b.preferredDate||'No date'} · {b.currency} {Number(b.totalAmount||0).toLocaleString()}</p>
@@ -952,7 +1020,7 @@ export default function Admin() {
                   <div key={b.bookingId} className="glass-card p-4">
                     <div className="flex items-center justify-between mb-1">
                       <p className="font-semibold text-sm">{b.clientName}</p>
-                      <Badge status={b.bookingStatus}/>
+                      <Badge status={effectiveStatus ? effectiveStatus(b) : b.bookingStatus}/>
                     </div>
                     <p className="font-mono text-xs text-[#9a7080]">{b.bookingId} · {b.preferredDate||'No date'}</p>
                   </div>
@@ -995,7 +1063,7 @@ export default function Admin() {
                               <p className="font-semibold text-sm text-[#3d1f6e]">{b.clientName}</p>
                               <div className="flex items-center gap-1.5">
                                 {b.serviceAttended && <CheckCircle2 size={12} className="text-[#3d7a53]"/>}
-                                <Badge status={b.bookingStatus}/>
+                                <Badge status={effectiveStatus ? effectiveStatus(b) : b.bookingStatus}/>
                               </div>
                             </div>
                             <p className="font-mono text-[10px] text-[#9a7080] mb-1">{b.bookingId} · {b.bookingType}</p>
@@ -1013,7 +1081,7 @@ export default function Admin() {
                   <DetailPanel booking={selectedBooking} note={note} setNote={setNote}
                     rejectionReason={rejectionReason} setRejectionReason={setRejectionReason}
                     onUpdate={updateStatus} onArchive={archiveBooking} onRestore={restoreBooking}
-                    onMarkAttended={markAttended} onDelete={deleteBooking}
+                    onDelete={deleteBooking} isExpiredBooking={isExpiredBooking}
                     busy={loadingId===selectedBooking?.bookingId}/>
                 </div>
               </div>
@@ -1021,7 +1089,7 @@ export default function Admin() {
           )}
 
           {/* ── CALENDAR TAB ── */}
-          {activeTab==='calendar' && <CalendarTab bookings={bookings}/>}
+          {activeTab==='calendar' && <CalendarTab bookings={bookings} onMarkAttended={markAttended} loadingId={loadingId}/>}
 
           {/* ── USERS TAB ── */}
           {activeTab==='users' && <UsersTab bookings={bookings} onDeleteUser={deleteUser}/>}
@@ -1047,7 +1115,7 @@ export default function Admin() {
               rejectionReason={rejectionReason} setRejectionReason={setRejectionReason}
               onClose={()=>setSheetOpen(false)}
               onUpdate={updateStatus} onArchive={archiveBooking} onRestore={restoreBooking}
-              onMarkAttended={markAttended} onDelete={deleteBooking}
+              onDelete={deleteBooking} isExpiredBooking={isExpiredBooking}
               busy={loadingId===selectedBooking?.bookingId}/>
           </div>
         </>

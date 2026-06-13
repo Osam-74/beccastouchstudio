@@ -394,10 +394,10 @@ function tplStatusUpdate(b, note) {
   const isConfirmed = b.status === "confirmed";
   const isRejected = b.status === "rejected" || b.status === "cancelled";
   const headline = isConfirmed ? "Booking Confirmed! \u{1F389}" : isRejected ? "Update on Your Booking" : "Booking Status Updated";
-  const statusLabel = isConfirmed ? "\u2705 Confirmed" : isRejected ? "\u274C Not confirmed" : String(b.status || "");
+  const statusLabel = isConfirmed ? "\u2705 Confirmed" : isRejected ? "\u274C Rejected" : String(b.status || "");
   const trackUrl = `https://beccastouchstudio.vercel.app/track-booking?id=${b.booking_id}`;
   const typeLabel = bookingTypeLabel(b);
-  const rows = dr("Booking ID", b.booking_id) + dr("Type", typeLabel) + (b.preferred_date ? dr("Date", b.preferred_date) : "") + (b.start_time ? dr("Time", b.start_time) : "") + dr("Status", statusLabel) + dr("Name", b.client_name) + dr("Phone", b.phone) + dr("Email", b.email);
+  const rows = dr("Booking ID", b.booking_id) + dr("Type", typeLabel) + (b.preferred_date ? dr("Date", b.preferred_date) : "") + (b.start_time ? dr("Time", b.start_time) : "") + dr("Status", statusLabel);
   const noteHtml = note ? `<div style="background:#fffbf0;border-radius:12px;border:1px solid #f0e4b8;padding:14px 18px;margin:14px 0;"><p style="margin:0;font-size:13px;color:#6a5020;">${note}</p></div>` : "";
   const confirmedExtra = isConfirmed ? `
     <div style="margin-top:20px;text-align:center;">
@@ -419,10 +419,10 @@ function tplStatusUpdate(b, note) {
   const body = `
     <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">${headline}</h2>
     <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">Hi ${b.client_name}, here is an update on your booking.</p>
+    ${rejectedExtra}
     ${dtable(rows)}
     ${noteHtml}
     ${confirmedExtra}
-    ${rejectedExtra}
     <p style="font-size:12px;color:#9a7090;margin-top:16px;">Questions? Reply to this email or WhatsApp us on <b>${WHATSAPP}</b>.</p>`;
   return shell("", "", body);
 }
