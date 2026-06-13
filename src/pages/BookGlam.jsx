@@ -239,6 +239,7 @@ export default function BookGlam() {
   // General
   const [genService, setGenService] = useState('makeup');
   const [genLocationType, setGenLocationType] = useState('studio'); // 'studio' | 'home'
+  const [genHomeAddress, setGenHomeAddress] = useState('');
   const [genTime, setGenTime] = useState('10:00');
   const [selectedDate, setSelectedDate] = useState(null);
   const [contact, setContact] = useState({ clientName:'', phone:'', email:'', notes:'' });
@@ -273,6 +274,7 @@ export default function BookGlam() {
         setOccasion(b.occasion||'general');
         setGenService(b.serviceType||'makeup');
         setGenLocationType(b.locationType||'studio');
+        setGenHomeAddress(b.homeAddress||'');
         setGenTime(b.startTime||'10:00');
         setSelectedDate(b.preferredDate?new Date(`${b.preferredDate}T00:00:00`):null);
         setContact({clientName:b.clientName||'',phone:b.phone||'',email:b.email||'',notes:b.notes||''});
@@ -292,10 +294,11 @@ export default function BookGlam() {
 
   // ── General handlers ──
   async function genDraft(partial=false){
-    const d=await bookingApi.saveDraft({booking_type:'glam',booking_id:bookingId||undefined,occasion:'general',service_type:genService,location_type:genLocationType,start_time:genTime,preferred_date:selectedDate?format(selectedDate,'yyyy-MM-dd'):'',client_name:contact.clientName,phone:contact.phone,email:contact.email,notes:contact.notes,payment_reference:payment.reference,payment_receipt_name:payment.receiptName,payment_receipt_data_url:payment.receiptDataUrl,total_amount:genTotal,currency:SITE.currency,reschedule_count:rescheduleCount,booking_status:partial?'draft':undefined});
+    const d=await bookingApi.saveDraft({booking_type:'glam',booking_id:bookingId||undefined,occasion:'general',service_type:genService,location_type:genLocationType,home_address:genLocationType==='home'?genHomeAddress:'',start_time:genTime,preferred_date:selectedDate?format(selectedDate,'yyyy-MM-dd'):'',client_name:contact.clientName,phone:contact.phone,email:contact.email,notes:contact.notes,payment_reference:payment.reference,payment_receipt_name:payment.receiptName,payment_receipt_data_url:payment.receiptDataUrl,total_amount:genTotal,currency:SITE.currency,reschedule_count:rescheduleCount,booking_status:partial?'draft':undefined});
     setBookingId(d.bookingId);return d;
   }
   async function genNext0(){
+    if(genLocationType==='home'&&!genHomeAddress.trim())return showToast('Please enter your home address for the home service.','error');
     try{setSaving(true);const d=await genDraft(true);setStep(1);showToast(`ID: ${d.bookingId}`,'success');}
     catch(e){showToast(e.message,'error');}finally{setSaving(false);}
   }
@@ -312,7 +315,7 @@ export default function BookGlam() {
     if(isReschedule&&rescheduleCount>=1)return showToast('Already rescheduled once.','error');
     try{
       setSubmitting(true);
-      const d=await bookingApi.submitBooking({booking_type:'glam',booking_id:bookingId||undefined,occasion:'general',service_type:genService,location_type:genLocationType,start_time:genTime,preferred_date:selectedDate?format(selectedDate,'yyyy-MM-dd'):'',client_name:contact.clientName,phone:contact.phone,email:contact.email,notes:contact.notes,payment_reference:payment.reference,payment_receipt_name:payment.receiptName,payment_receipt_data_url:payment.receiptDataUrl,total_amount:genTotal,currency:SITE.currency,reschedule_count:isReschedule?rescheduleCount+1:rescheduleCount,booking_status:'pending'});
+      const d=await bookingApi.submitBooking({booking_type:'glam',booking_id:bookingId||undefined,occasion:'general',service_type:genService,location_type:genLocationType,home_address:genLocationType==='home'?genHomeAddress:'',start_time:genTime,preferred_date:selectedDate?format(selectedDate,'yyyy-MM-dd'):'',client_name:contact.clientName,phone:contact.phone,email:contact.email,notes:contact.notes,payment_reference:payment.reference,payment_receipt_name:payment.receiptName,payment_receipt_data_url:payment.receiptDataUrl,total_amount:genTotal,currency:SITE.currency,reschedule_count:isReschedule?rescheduleCount+1:rescheduleCount,booking_status:'pending'});
       setBookingId(d.bookingId);setSubmitted(d.booking);showToast(isReschedule?'Rescheduled!':'Submitted!','success');
     }catch(e){showToast(e.message,'error');}finally{setSubmitting(false);}
   }
@@ -557,6 +560,20 @@ export default function BookGlam() {
                 ))}
               </div>
             </div>
+
+            {/* Home address — only shown when home service is selected */}
+            {genLocationType === 'home' && (
+              <div>
+                <label className="label-text">Home address *</label>
+                <textarea
+                  value={genHomeAddress}
+                  onChange={e => setGenHomeAddress(e.target.value)}
+                  rows={3}
+                  className="input-field resize-none mt-1"
+                  placeholder="Give a detailed description of your location — street, landmark, area, city (e.g. 12 Adeola Street, opposite First Bank, Bodija, Ibadan)"
+                />
+              </div>
+            )}
 
             {/* Date + Time in a 2-col grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

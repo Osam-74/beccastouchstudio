@@ -405,6 +405,8 @@ function toFE(b: Record<string,unknown>): Record<string,unknown> {
     // Special
     specialRequestText: b.special_request_text,
     specialRequestAudioUrl: b.special_request_audio_url,
+    // Home service
+    homeAddress:        b.home_address,
     // Summary
     summary:            b.client_summary,
     clientSummary:      b.client_summary,
@@ -502,7 +504,9 @@ function tplSubmitted(b: Record<string,unknown>) {
     (b.total_amount ? dr('Amount', (b.currency as string || 'NGN') + ' ' + Number(b.total_amount).toLocaleString()) : '') +
     dr('Name', b.client_name as string) +
     dr('Phone', b.phone as string) +
-    dr('Email', b.email as string);
+    dr('Email', b.email as string) +
+    (b.location_type ? dr('Service type', b.location_type === 'home' ? 'Home service' : 'Studio walk-in') : '') +
+    (b.location_type === 'home' && b.home_address ? dr('Home address', b.home_address as string) : '');
 
   const body = `
     <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">${headline}</h2>
@@ -532,6 +536,7 @@ function tplAdmin(b: Record<string,unknown>) {
     dr('Email', b.email as string) +
     (b.notes ? dr('Notes', b.notes as string) : '') +
     (b.location_type ? dr('Service type', b.location_type === 'home' ? 'Home service' : 'Studio walk-in') : '') +
+    (b.location_type === 'home' && b.home_address ? dr('Home address', b.home_address as string) : '') +
     (b.payment_reference ? dr('Payment ref', b.payment_reference as string) : '');
 
   const body = `
@@ -560,7 +565,9 @@ function tplStatusUpdate(b: Record<string,unknown>, note: string) {
     dr('Booking ID', b.booking_id as string) +
     dr('Type', typeLabel) +
     (b.preferred_date ? dr('Date', b.preferred_date as string) : '') +
-    (b.start_time ? dr('Time', b.start_time as string) : '');
+    (b.start_time ? dr('Time', b.start_time as string) : '') +
+    (b.location_type ? dr('Service type', b.location_type === 'home' ? 'Home service' : 'Studio walk-in') : '') +
+    (b.location_type === 'home' && b.home_address ? dr('Home address', b.home_address as string) : '');
 
   const confirmedExtra = isConfirmed ? `
     <div style="margin-top:20px;text-align:center;">

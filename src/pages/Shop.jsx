@@ -56,9 +56,9 @@ function ProductDetailPage({ product, cart, onAddToCart, onBack }) {
   const hasSale = product.sale_price != null && Number(product.sale_price) > 0 && Number(product.sale_price) < Number(product.price);
 
   return (
-    <div className="fixed inset-0 z-40 bg-[#fdf8f5] overflow-y-auto">
+    <div className="fixed inset-0 z-[60] bg-[#fdf8f5] overflow-y-auto">
       {/* Back bar */}
-      <div className="sticky top-0 z-10 bg-white/90 backdrop-blur-md border-b border-[#f0e0e8] px-4 py-3 flex items-center gap-3">
+      <div className="sticky top-0 z-[61] bg-white/90 backdrop-blur-md border-b border-[#f0e0e8] px-4 py-3 flex items-center gap-3">
         <button type="button" onClick={onBack} className="w-9 h-9 rounded-full border border-[#eecdd4] bg-white flex items-center justify-center text-[#3d1f6e]">
           <ChevronLeft size={16}/>
         </button>

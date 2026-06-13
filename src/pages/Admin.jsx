@@ -237,6 +237,18 @@ function DetailPanel({ booking, note, setNote, rejectionReason, setRejectionReas
               <p className="text-[#3d1f6e] text-xs">{booking.notes}</p>
             </div>
           )}
+          {booking.locationType && (
+            <div className="rounded-2xl bg-white/70 border border-[#eed4da] px-3 py-2.5">
+              <p className="text-[8px] uppercase tracking-[0.22em] text-[#9a7080] mb-0.5">Service type</p>
+              <p className="text-[#3d1f6e] text-xs font-semibold">{booking.locationType === 'home' ? '🏠 Home service' : '🏢 Studio walk-in'}</p>
+            </div>
+          )}
+          {booking.locationType === 'home' && booking.homeAddress && (
+            <div className="col-span-2 rounded-2xl bg-[#f0f8ff] border border-[#b8d8f0] px-3 py-2.5">
+              <p className="text-[8px] uppercase tracking-[0.22em] text-[#3a6080] mb-0.5">🏠 Home address</p>
+              <p className="text-[#1a4060] text-xs">{booking.homeAddress}</p>
+            </div>
+          )}
           {/* service attended indicator */}
           <div className="col-span-2 rounded-2xl border px-3 py-2.5 flex items-center gap-2"
             style={{ background: booking.serviceAttended ? '#f0faf3' : '#fff4f6', borderColor: booking.serviceAttended ? '#b8e0c8' : '#eecdd4' }}>

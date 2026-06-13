@@ -152,6 +152,19 @@ export default function TrackBooking() {
                 </div>
               )}
 
+              {booking.locationType && (
+                <div className="rounded-2xl bg-white/70 border border-[#eecdd4] p-3 mb-3 text-sm">
+                  <p className="label-text mb-0.5">Service type</p>
+                  <p className="text-[#3d1f6e] font-medium">{booking.locationType === 'home' ? '🏠 Home service' : '🏢 Studio walk-in'}</p>
+                </div>
+              )}
+              {booking.locationType === 'home' && booking.homeAddress && (
+                <div className="rounded-2xl bg-[#f0f8ff] border border-[#b8d8f0] p-3 mb-3 text-sm">
+                  <p className="label-text mb-0.5">🏠 Home address</p>
+                  <p className="text-[#1a4060]">{booking.homeAddress}</p>
+                </div>
+              )}
+
               <p className="text-xs text-[#9a7080]">{booking.summary}</p>
             </div>
 

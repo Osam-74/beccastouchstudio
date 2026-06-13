@@ -311,6 +311,8 @@ function toFE(b) {
     // Special
     specialRequestText: b.special_request_text,
     specialRequestAudioUrl: b.special_request_audio_url,
+    // Home service
+    homeAddress: b.home_address,
     // Summary
     summary: b.client_summary,
     clientSummary: b.client_summary
@@ -366,7 +368,7 @@ function tplSubmitted(b) {
   const subtitle = `Hi ${b.client_name}, we got your booking request`;
   const statusMsg = isBridalOrSpecial ? `Your ${b.occasion} request has been submitted. Our team will reach out shortly to discuss details and pricing.` : `Your booking has been submitted and is under review. We'll confirm or be in touch with you shortly.`;
   const typeLabel = bookingTypeLabel(b);
-  const rows = dr("Booking ID", b.booking_id) + dr("Type", typeLabel) + (b.preferred_date ? dr("Date", b.preferred_date) : "") + (b.start_time ? dr("Time", b.start_time) : "") + (b.occasion ? dr("Occasion", String(b.occasion)) : "") + (b.total_amount ? dr("Amount", (b.currency || "NGN") + " " + Number(b.total_amount).toLocaleString()) : "") + dr("Name", b.client_name) + dr("Phone", b.phone) + dr("Email", b.email);
+  const rows = dr("Booking ID", b.booking_id) + dr("Type", typeLabel) + (b.preferred_date ? dr("Date", b.preferred_date) : "") + (b.start_time ? dr("Time", b.start_time) : "") + (b.occasion ? dr("Occasion", String(b.occasion)) : "") + (b.total_amount ? dr("Amount", (b.currency || "NGN") + " " + Number(b.total_amount).toLocaleString()) : "") + dr("Name", b.client_name) + dr("Phone", b.phone) + dr("Email", b.email) + (b.location_type ? dr("Service type", b.location_type === "home" ? "Home service" : "Studio walk-in") : "") + (b.location_type === "home" && b.home_address ? dr("Home address", b.home_address) : "");
   const body = `
     <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">${headline}</h2>
     <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">${subtitle}</p>
@@ -380,7 +382,7 @@ function tplSubmitted(b) {
 }
 function tplAdmin(b) {
   const typeLabel = bookingTypeLabel(b);
-  const rows = dr("Booking ID", b.booking_id) + dr("Type", typeLabel) + (b.preferred_date ? dr("Date", b.preferred_date) : "") + (b.start_time ? dr("Time", b.start_time) : "") + (b.occasion ? dr("Occasion", String(b.occasion)) : "") + (b.total_amount ? dr("Amount", (b.currency || "NGN") + " " + Number(b.total_amount).toLocaleString()) : "") + dr("Name", b.client_name) + dr("Phone", b.phone) + dr("Email", b.email) + (b.notes ? dr("Notes", b.notes) : "") + (b.location_type ? dr("Service type", b.location_type === "home" ? "Home service" : "Studio walk-in") : "") + (b.payment_reference ? dr("Payment ref", b.payment_reference) : "");
+  const rows = dr("Booking ID", b.booking_id) + dr("Type", typeLabel) + (b.preferred_date ? dr("Date", b.preferred_date) : "") + (b.start_time ? dr("Time", b.start_time) : "") + (b.occasion ? dr("Occasion", String(b.occasion)) : "") + (b.total_amount ? dr("Amount", (b.currency || "NGN") + " " + Number(b.total_amount).toLocaleString()) : "") + dr("Name", b.client_name) + dr("Phone", b.phone) + dr("Email", b.email) + (b.notes ? dr("Notes", b.notes) : "") + (b.location_type ? dr("Service type", b.location_type === "home" ? "Home service" : "Studio walk-in") : "") + (b.location_type === "home" && b.home_address ? dr("Home address", b.home_address) : "") + (b.payment_reference ? dr("Payment ref", b.payment_reference) : "");
   const body = `
     <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">New Booking Received \u{1F4CB}</h2>
     <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">A new <b>${typeLabel}</b> booking just came in.</p>
@@ -397,7 +399,7 @@ function tplStatusUpdate(b, note) {
   const statusLabel = isConfirmed ? "\u2705 Confirmed" : isRejected ? "\u274C Rejected" : String(b.status || "");
   const trackUrl = `https://beccastouchstudio.vercel.app/track-booking?id=${b.booking_id}`;
   const typeLabel = bookingTypeLabel(b);
-  const rows = dr("Status", statusLabel) + dr("Booking ID", b.booking_id) + dr("Type", typeLabel) + (b.preferred_date ? dr("Date", b.preferred_date) : "") + (b.start_time ? dr("Time", b.start_time) : "");
+  const rows = dr("Status", statusLabel) + dr("Booking ID", b.booking_id) + dr("Type", typeLabel) + (b.preferred_date ? dr("Date", b.preferred_date) : "") + (b.start_time ? dr("Time", b.start_time) : "") + (b.location_type ? dr("Service type", b.location_type === "home" ? "Home service" : "Studio walk-in") : "") + (b.location_type === "home" && b.home_address ? dr("Home address", b.home_address) : "");
   const confirmedExtra = isConfirmed ? `
     <div style="margin-top:20px;text-align:center;">
       <a href="${trackUrl}" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;font-size:14px;font-weight:700;padding:14px 28px;border-radius:50px;text-decoration:none;">\u2B07\uFE0F Download Your Ticket</a>

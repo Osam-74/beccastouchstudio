@@ -25,8 +25,10 @@ const BookingTicketCard = forwardRef(function BookingTicketCard({ booking }, ref
     ['Type',   booking.bookingType === 'studio' ? 'Studio Session' : 'Glam',       Ticket],
     ['Amount', `${booking.currency} ${Number(booking.totalAmount||0).toLocaleString()}`, Banknote],
   ];
-  if (booking.startTime) rows.push(['Time', booking.startTime, Clock]);
-  if (booking.phone)     rows.push(['Phone', booking.phone, Phone]);
+  if (booking.startTime)   rows.push(['Time', booking.startTime, Clock]);
+  if (booking.phone)       rows.push(['Phone', booking.phone, Phone]);
+  if (booking.locationType) rows.push(['Service', booking.locationType === 'home' ? 'Home service' : 'Studio walk-in', MapPin]);
+  if (booking.locationType === 'home' && booking.homeAddress) rows.push(['Address', booking.homeAddress, MapPin]);
 
   return (
     <div
