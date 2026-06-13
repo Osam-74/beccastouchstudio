@@ -276,17 +276,25 @@ async function getFirebasePublicKeys(): Promise<Record<string,string>> {
 }
 
 async function verifyFirebaseIdToken(token: string, projectId: string): Promise<{ uid: string; email: string }> {
-  // Use Google's tokeninfo endpoint — no fragile crypto/DER parsing needed
-  const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${token}`);
+  // Use Firebase Auth REST API to verify the ID token server-side.
+  // This is the officially supported way from a Cloudflare Worker — no crypto/cert parsing needed.
+  const apiKey = 'AIzaSyClmvYRY8dyvabeRyCTRde4gk59rTcnBho';
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: token }),
+    }
+  );
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`Token verification failed: ${txt}`);
   }
-  const info = await res.json() as Record<string, string>;
-  if (info.aud !== projectId) throw new Error(`Token audience mismatch: got ${info.aud}`);
-  const now = Math.floor(Date.now() / 1000);
-  if (Number(info.exp) < now) throw new Error('Token expired');
-  return { uid: info.sub || '', email: info.email || '' };
+  const data = await res.json() as { users?: Array<{ localId: string; email: string }> };
+  const user = data.users?.[0];
+  if (!user) throw new Error('Token verification failed: no user found');
+  return { uid: user.localId, email: user.email || '' };
 }
 
 

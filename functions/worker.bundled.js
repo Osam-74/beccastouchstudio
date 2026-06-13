@@ -206,16 +206,23 @@ async function sendMail(env, to, subject, html, _fs) {
   }
 }
 async function verifyFirebaseIdToken(token, projectId) {
-  const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${token}`);
+  const apiKey = "AIzaSyClmvYRY8dyvabeRyCTRde4gk59rTcnBho";
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken: token })
+    }
+  );
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`Token verification failed: ${txt}`);
   }
-  const info = await res.json();
-  if (info.aud !== projectId) throw new Error(`Token audience mismatch: got ${info.aud}`);
-  const now = Math.floor(Date.now() / 1e3);
-  if (Number(info.exp) < now) throw new Error("Token expired");
-  return { uid: info.sub || "", email: info.email || "" };
+  const data = await res.json();
+  const user = data.users?.[0];
+  if (!user) throw new Error("Token verification failed: no user found");
+  return { uid: user.localId, email: user.email || "" };
 }
 async function checkAuth(env, request) {
   const auth = request.headers.get("Authorization") || "";
