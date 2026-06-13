@@ -12,6 +12,7 @@ var STUDIO = "Beccastouch Studio";
 var ADDRESS = "Total Filling Station, Oju-Irin Bodija, Ibadan, Oyo State";
 var DEFAULT_PIN = "12345678";
 var PHONE = "+234 802 327 4274";
+var WHATSAPP = "+234 805 198 2695";
 var RULES = [
   "Your booking is provisional until payment is verified and the studio confirms your slot.",
   "Keep your booking ID safe \u2014 use it to track status or resume your booking.",
@@ -353,7 +354,7 @@ function tplSubmitted(b) {
     </div>
     ${dtable(rows)}
     <p style="font-size:12px;color:#9a7090;margin-top:16px;">\u{1F4CD} <b>${ADDRESS}</b></p>
-    <p style="font-size:12px;color:#9a7090;margin-top:8px;">Questions? Reply to this email or WhatsApp us on <b>${PHONE}</b>.</p>`;
+    <p style="font-size:12px;color:#9a7090;margin-top:8px;">Questions? Reply to this email or WhatsApp us on <b>${WHATSAPP}</b>.</p>`;
   return shell("", "", body);
 }
 function tplAdmin(b) {
@@ -364,7 +365,7 @@ function tplAdmin(b) {
     <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">A new <b>${typeLabel}</b> booking just came in.</p>
     ${dtable(rows)}
     <div style="margin-top:20px;text-align:center;">
-      <a href="https://beccastouchstudio.vercel.app/admin" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review in Admin Panel \u2192</a>
+      <a href="https://beccastouchstudio.vercel.app/sg-bec" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review in Admin Panel \u2192</a>
     </div>`;
   return shell("", "", body);
 }
@@ -373,7 +374,7 @@ function tplStatusUpdate(b, note) {
   const isRejected = b.status === "rejected" || b.status === "cancelled";
   const headline = isConfirmed ? "Booking Confirmed! \u{1F389}" : isRejected ? "Update on Your Booking" : "Booking Status Updated";
   const statusLabel = isConfirmed ? "\u2705 Confirmed" : isRejected ? "\u274C Not confirmed" : String(b.status || "");
-  const trackUrl = `https://osam-74.github.io/beccastouchstudio/track?id=${b.booking_id}`;
+  const trackUrl = `https://beccastouchstudio.vercel.app/track-booking?id=${b.booking_id}`;
   const typeLabel = bookingTypeLabel(b);
   const rows = dr("Booking ID", b.booking_id) + dr("Type", typeLabel) + (b.preferred_date ? dr("Date", b.preferred_date) : "") + (b.start_time ? dr("Time", b.start_time) : "") + dr("Status", statusLabel) + dr("Name", b.client_name) + dr("Phone", b.phone) + dr("Email", b.email);
   const noteHtml = note ? `<div style="background:#fffbf0;border-radius:12px;border:1px solid #f0e4b8;padding:14px 18px;margin:14px 0;"><p style="margin:0;font-size:13px;color:#6a5020;">${note}</p></div>` : "";
@@ -387,6 +388,10 @@ function tplStatusUpdate(b, note) {
       <p style="margin:0;font-size:12px;color:#2a6a45;line-height:1.7;">\u{1F4CD} <b>${ADDRESS}</b><br>\u23F0 Please arrive <b>15 minutes early</b> so we can get you settled.<br>\u{1F4DE} Questions? Call us on <b>${PHONE}</b></p>
     </div>` : "";
   const rejectedExtra = isRejected ? `
+    ${note ? `<div style="margin-top:16px;padding:14px 18px;background:#fff4f4;border-radius:12px;border:1px solid rgba(168,64,64,0.2);">
+      <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:0.12em;color:#a84040;font-weight:700;">Reason for rejection</p>
+      <p style="margin:0;font-size:13px;color:#7a4040;line-height:1.6;">${note}</p>
+    </div>` : ""}
     <div style="margin-top:16px;padding:12px 18px;background:#fff4f4;border-radius:12px;border:1px solid rgba(168,64,64,0.15);">
       <p style="margin:0;font-size:13px;color:#7a4040;line-height:1.6;">We are sorry we could not accommodate your booking this time. We would love to find another time \u2014 feel free to rebook. You can also reach us on <b>${PHONE}</b>.</p>
     </div>` : "";
@@ -397,7 +402,7 @@ function tplStatusUpdate(b, note) {
     ${noteHtml}
     ${confirmedExtra}
     ${rejectedExtra}
-    <p style="font-size:12px;color:#9a7090;margin-top:16px;">Questions? Reply to this email or WhatsApp us on <b>${PHONE}</b>.</p>`;
+    <p style="font-size:12px;color:#9a7090;margin-top:16px;">Questions? Reply to this email or WhatsApp us on <b>${WHATSAPP}</b>.</p>`;
   return shell("", "", body);
 }
 async function notifySubmission(fs, env, b) {
@@ -408,11 +413,11 @@ async function notifySubmission(fs, env, b) {
     let subject;
     if (isStudio) {
       const svcLabel = b.studio_use === "content" ? "Content Creation" : "Photoshoot";
-      subject = `${svcLabel} booking received \u2014 ${b.booking_id} | ${STUDIO}`;
+      subject = `${svcLabel} booking received - ${b.booking_id} | ${STUDIO}`;
     } else if (isBridalOrSpecial) {
-      subject = `${b.occasion === "bridal" ? "Bridal" : "Special"} request received \u2014 ${b.booking_id} | ${STUDIO}`;
+      subject = `${b.occasion === "bridal" ? "Bridal" : "Special"} request received - ${b.booking_id} | ${STUDIO}`;
     } else {
-      subject = `Glam booking received \u2014 ${b.booking_id} | ${STUDIO}`;
+      subject = `Glam booking received - ${b.booking_id} | ${STUDIO}`;
     }
     try {
       await sendMail(env, clientEmail, subject, tplSubmitted(b), fs);
@@ -424,7 +429,7 @@ async function notifySubmission(fs, env, b) {
   if (adminEmail) {
     const typeLabel = b.booking_type === "studio" ? b.studio_use === "content" ? "Content Creation" : "Photoshoot" : String(b.occasion || "Glam");
     try {
-      await sendMail(env, adminEmail, `[${STUDIO}] New booking \u2014 ${b.booking_id} | ${typeLabel}`, tplAdmin(b), fs);
+      await sendMail(env, adminEmail, `[${STUDIO}] New booking - ${b.booking_id} | ${typeLabel}`, tplAdmin(b), fs);
     } catch (e) {
       console.error("admin email:", e);
     }
@@ -495,7 +500,8 @@ var worker_default = {
       if (action === "adminOverview") {
         await checkPin(fs, env, body.pin);
         const all = await fs.query("bookings", [], "-created_date");
-        return j({ ok: true, bookings: all.map(toFE), total: all.length });
+        const profile = await fs.get("config", "admin_profile") || {};
+        return j({ ok: true, bookings: all.map(toFE), total: all.length, adminProfile: profile });
       }
       if (action === "resetPin") {
         await checkPin(fs, env, body.old_pin);
@@ -512,9 +518,11 @@ var worker_default = {
       }
       if (action === "saveAdminProfile") {
         await checkPin(fs, env, body.pin);
-        const p = body.profile || {};
+        const name = (body.name || "").trim();
+        const existing = await fs.get("config", "admin_profile") || {};
+        const p = { ...existing, name };
         await fs.set("config", "admin_profile", p);
-        return j({ ok: true });
+        return j({ ok: true, profile: p });
       }
       if (action === "adminUpdateStatus") {
         await checkPin(fs, env, body.pin);
@@ -522,11 +530,18 @@ var worker_default = {
         const b = await findBooking(fs, bid_val2);
         if (!b) return j({ error: "Booking not found" }, 404);
         const newStatus = body.status || body.bookingStatus;
-        const updated = await fs.update("bookings", b.id, { status: newStatus, booking_status: newStatus, admin_note: body.note || body.adminNote || "" });
-        const note = body.note || "";
+        const note = (body.note || body.adminNote || "").trim();
+        const rejectionReason = (body.rejectionReason || body.rejection_reason || "").trim();
+        const updated = await fs.update("bookings", b.id, {
+          status: newStatus,
+          booking_status: newStatus,
+          admin_note: note,
+          rejection_reason: rejectionReason
+        });
+        const emailNote = rejectionReason ? note ? note + "\n\n" + rejectionReason : rejectionReason : note;
         if (b.email) {
           try {
-            await sendMail(env, b.email, `[${STUDIO}] Booking update \u2014 ${b.booking_id}`, tplStatusUpdate(updated, note), fs);
+            await sendMail(env, b.email, `[${STUDIO}] Booking update - ${b.booking_id}`, tplStatusUpdate(updated, emailNote), fs);
           } catch (e) {
             console.error("status update email:", e);
           }
@@ -645,14 +660,14 @@ var worker_default = {
         if (override === "submitted") {
           html = tplSubmitted(b);
           const typeLabel = bookingTypeLabel(b);
-          subject = `[TEST] ${typeLabel} booking received \u2014 ${b.booking_id || "TEST"} | ${STUDIO}`;
+          subject = `[TEST] ${typeLabel} booking received - ${b.booking_id || "TEST"} | ${STUDIO}`;
         } else if (override === "admin") {
           html = tplAdmin(b);
           const typeLabel = bookingTypeLabel(b);
-          subject = `[TEST] New booking \u2014 ${b.booking_id || "TEST"} | ${typeLabel} | ${STUDIO}`;
+          subject = `[TEST] New booking - ${b.booking_id || "TEST"} | ${typeLabel} | ${STUDIO}`;
         } else if (override === "statusUpdate") {
           html = tplStatusUpdate(b, note);
-          subject = `[TEST] Booking update \u2014 ${b.booking_id || "TEST"} | ${STUDIO}`;
+          subject = `[TEST] Booking update - ${b.booking_id || "TEST"} | ${STUDIO}`;
         } else {
           html = shell("", "", `
             <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">Email is working! \u{1F389}</h2>
@@ -685,7 +700,7 @@ var worker_default = {
           <p style="font-size:12px;color:#9a7090;margin-top:16px;">\u{1F4CD} <b>${ADDRESS}</b><br>\u{1F4DE} ${PHONE}<br>We cannot wait to see you! \u{1F338}</p>`;
         const reminderHtml = shell("", "", reminderBody);
         try {
-          await sendMail(env, b.email, `Reminder: your session is in 2 hours \u2014 ${b.booking_id} | ${STUDIO}`, reminderHtml);
+          await sendMail(env, b.email, `Reminder: your session is in 2 hours - ${b.booking_id} | ${STUDIO}`, reminderHtml);
           return j({ ok: true });
         } catch (e) {
           return j({ error: e.message }, 500);
@@ -717,9 +732,9 @@ var worker_default = {
               <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">A new shop order just came in \u2014 review below.</p>
               ${dtable(shopRows)}
               <div style="margin-top:20px;text-align:center;">
-                <a href="https://beccastouchstudio.vercel.app/admin" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review in Admin Panel \u2192</a>
+                <a href="https://beccastouchstudio.vercel.app/sg-bec" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review in Admin Panel \u2192</a>
               </div>`;
-            await sendMail(env, adminEmail, `[${STUDIO}] New shop order \u2014 ${orderId}`, shell("", "", shopBody));
+            await sendMail(env, adminEmail, `[${STUDIO}] New shop order - ${orderId}`, shell("", "", shopBody));
           } catch (e) {
             console.error("shop order admin email:", e);
           }
@@ -736,10 +751,31 @@ var worker_default = {
         const docId = body.orderId;
         const existing = await fs.get("shop_orders", docId);
         if (!existing) return j({ error: "Order not found" }, 404);
+        const newOrderStatus = body.status;
         const updated = await fs.update("shop_orders", docId, {
-          status: body.status,
+          status: newOrderStatus,
           notes: body.notes || String(existing.notes || "")
         });
+        if (newOrderStatus === "delivered" && existing.email) {
+          const deliveryHtml = shell("", "", `
+            <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">Order Delivered! \u{1F389}</h2>
+            <p style="margin:0 0 20px;font-size:13px;color:#9a7080;">Hi ${String(existing.name || "there")}, your order has been delivered.</p>
+            <div style="background:#f0faf3;border:1px solid #b8e0c8;border-radius:12px;padding:14px 18px;margin-bottom:20px;">
+              <p style="margin:0;font-size:13px;color:#3d7a53;font-weight:600;">\u2705 Your order from ${STUDIO} is on its way or has arrived!</p>
+            </div>
+            ${dtable(
+            dr("Order ID", String(existing.order_id || docId)) + dr("Name", String(existing.name || "")) + dr("Phone", String(existing.phone || ""))
+          )}
+            <div style="margin-top:20px;padding:14px 18px;background:#fdf6f9;border-radius:12px;border:1px solid #eecdd4;">
+              <p style="margin:0;font-size:13px;color:#7a4060;line-height:1.7;">Thank you so much for shopping with us at <b>${STUDIO}</b>! \u{1F338}<br>We hope you absolutely love your order. We cannot wait to serve you again \u2014 see you soon! \u{1F484}</p>
+            </div>
+            <p style="font-size:12px;color:#9a7090;margin-top:16px;">Questions? WhatsApp us on <b>${WHATSAPP}</b></p>`);
+          try {
+            await sendMail(env, existing.email, `[${STUDIO}] Your order has been delivered! \u{1F389}`, deliveryHtml, fs);
+          } catch (e) {
+            console.error("delivery email:", e);
+          }
+        }
         return j({ ok: true, order: updated });
       }
       if (action === "adminDeleteShopOrder") {
@@ -749,6 +785,52 @@ var worker_default = {
         if (!existing) return j({ error: "Order not found" }, 404);
         await fs.delete("shop_orders", docId);
         return j({ ok: true });
+      }
+      if (action === "checkUnconfirmedBookings") {
+        const secret = body.secret || "";
+        const EXPECTED = env.BECCA_MAIL_SECRET || "~mQmAT.s6BUB'L.";
+        if (secret !== EXPECTED) return j({ error: "Unauthorized" }, 401);
+        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1e3).toISOString();
+        const all = await fs.query("bookings", [], "-created_date", 200);
+        const stale = all.filter(
+          (b) => b.status === "pending" && !b.is_archived && b.created_date < twoHoursAgo && !b.reminder_sent
+        );
+        const allOrders = await fs.query("shop_orders", [], "-created_date", 200);
+        const staleOrders = allOrders.filter(
+          (o) => o.status === "pending" && o.created_date < twoHoursAgo && !o.reminder_sent
+        );
+        const adminEmail = await fs.getConfig("smtp_user") || await fs.getConfig("gmail_email") || env.SMTP_USER || "";
+        if (!adminEmail) return j({ ok: true, reminded: 0 });
+        let reminded = 0;
+        for (const b of stale) {
+          const html = shell("", "", `
+            <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">\u23F0 Pending Booking Reminder</h2>
+            <p style="margin:0 0 16px;font-size:13px;color:#9a7080;">A booking has been waiting over 2 hours without a response.</p>
+            ${dtable(dr("Booking ID", b.booking_id) + dr("Client", b.client_name) + dr("Phone", b.phone) + dr("Type", bookingTypeLabel(b)) + (b.preferred_date ? dr("Date", b.preferred_date) : "") + dr("Submitted", new Date(b.created_date).toLocaleString("en-GB")))}
+            <div style="margin-top:20px;text-align:center;"><a href="https://beccastouchstudio.vercel.app/sg-bec" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review in Admin Panel \u2192</a></div>`);
+          try {
+            await sendMail(env, adminEmail, `[${STUDIO}] \u23F0 Booking pending 2h+ \u2014 ${b.booking_id}`, html, fs);
+            await fs.update("bookings", b.id, { reminder_sent: true });
+            reminded++;
+          } catch (e) {
+            console.error("reminder failed:", e);
+          }
+        }
+        for (const o of staleOrders) {
+          const html = shell("", "", `
+            <h2 style="margin:0 0 4px;font-size:20px;color:#3d1f6e;font-weight:800;">\u23F0 Pending Shop Order Reminder</h2>
+            <p style="margin:0 0 16px;font-size:13px;color:#9a7080;">A shop order has been waiting over 2 hours without action.</p>
+            ${dtable(dr("Order ID", String(o.order_id || o.id)) + dr("Client", o.name) + dr("Phone", o.phone) + dr("Submitted", new Date(o.created_date).toLocaleString("en-GB")))}
+            <div style="margin-top:20px;text-align:center;"><a href="https://beccastouchstudio.vercel.app/sg-bec" style="display:inline-block;background:linear-gradient(135deg,#3d1f6e,#c8788a);color:#fff;text-decoration:none;padding:12px 28px;border-radius:50px;font-weight:700;font-size:14px;">Review Orders \u2192</a></div>`);
+          try {
+            await sendMail(env, adminEmail, `[${STUDIO}] \u23F0 Shop order pending 2h+ \u2014 ${String(o.order_id || o.id)}`, html, fs);
+            await fs.update("shop_orders", o.id, { reminder_sent: true });
+            reminded++;
+          } catch (e) {
+            console.error("order reminder failed:", e);
+          }
+        }
+        return j({ ok: true, reminded, staleBookings: stale.length, staleOrders: staleOrders.length });
       }
       return j({ error: "Unknown action" }, 400);
     } catch (e) {

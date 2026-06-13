@@ -84,31 +84,34 @@ function OrderModal({ order, onClose, onUpdateStatus, onDelete, updating }) {
             )}
           </div>
 
-          {/* Actions — Cancel order / Delivered (no "Mark viewed" / "Done") */}
-          <div className="flex gap-2 flex-wrap">
-            {order.status !== 'delivered' && (
+          {order.status === 'delivered' ? (
+            <div className="rounded-xl bg-[#f0faf3] border border-[#b8e0c8] px-4 py-3 text-center">
+              <p className="text-xs font-semibold text-[#3d7a53]">✅ Delivered — thank-you email sent to client</p>
+            </div>
+          ) : (
+            <div className="flex gap-2 flex-wrap">
               <button type="button" onClick={() => onUpdateStatus(order.id, 'delivered')} disabled={busy}
                 className="flex-1 py-2.5 rounded-xl bg-[#f0faf3] border border-[#b8e0c8] text-[#3d7a53] text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50">
                 <Truck size={11}/> Delivered
               </button>
-            )}
-            {order.status !== 'cancelled' && (
-              <button type="button" onClick={() => onUpdateStatus(order.id, 'cancelled')} disabled={busy}
-                className="flex-1 py-2.5 rounded-xl bg-[#fff0f0] border border-[#f0c8c8] text-[#a84040] text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50">
-                <XCircle size={11}/> Cancel order
+              {order.status !== 'cancelled' && (
+                <button type="button" onClick={() => onUpdateStatus(order.id, 'cancelled')} disabled={busy}
+                  className="flex-1 py-2.5 rounded-xl bg-[#fff0f0] border border-[#f0c8c8] text-[#a84040] text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50">
+                  <XCircle size={11}/> Cancel order
+                </button>
+              )}
+              {order.status !== 'pending' && (
+                <button type="button" onClick={() => onUpdateStatus(order.id, 'pending')} disabled={busy}
+                  className="py-2.5 px-3 rounded-xl border border-[#eecdd4] text-[#7a5460] text-xs font-semibold disabled:opacity-50">
+                  Pending
+                </button>
+              )}
+              <button type="button" onClick={() => onDelete(order.id)} disabled={busy}
+                className="w-10 py-2.5 rounded-xl border border-[#f0c8c8] bg-white text-[#b05860] flex items-center justify-center disabled:opacity-50">
+                <Trash2 size={12}/>
               </button>
-            )}
-            {order.status !== 'pending' && (
-              <button type="button" onClick={() => onUpdateStatus(order.id, 'pending')} disabled={busy}
-                className="py-2.5 px-3 rounded-xl border border-[#eecdd4] text-[#7a5460] text-xs font-semibold disabled:opacity-50">
-                Pending
-              </button>
-            )}
-            <button type="button" onClick={() => onDelete(order.id)} disabled={busy}
-              className="w-10 py-2.5 rounded-xl border border-[#f0c8c8] bg-white text-[#b05860] flex items-center justify-center disabled:opacity-50">
-              <Trash2 size={12}/>
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </>

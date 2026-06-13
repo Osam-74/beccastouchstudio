@@ -239,7 +239,7 @@ function AdminFab({ activeTab, setActiveTab }) {
 }
 
 /* ─── detail panel ─── */
-function DetailPanel({ booking, note, setNote, onClose, onUpdate, onArchive, onRestore, onMarkAttended, onDelete, busy }) {
+function DetailPanel({ booking, note, setNote, rejectionReason, setRejectionReason, onClose, onUpdate, onArchive, onRestore, onMarkAttended, onDelete, busy }) {
   if (!booking) return (
     <div className="rose-card p-8 flex flex-col items-center justify-center min-h-[200px] text-sm text-[#9a7080]">
       <Ticket size={28} className="mb-3 text-[#eecdd4]"/>
@@ -316,26 +316,32 @@ function DetailPanel({ booking, note, setNote, onClose, onUpdate, onArchive, onR
           </div>
         )}
 
-        <textarea value={note} onChange={e=>setNote(e.target.value)} className="input-field min-h-[80px] mb-4 text-sm" placeholder="Admin note (sent to client on confirm/reject)"/>
+        <textarea value={note} onChange={e=>setNote(e.target.value)} className="input-field min-h-[80px] mb-3 text-sm" placeholder="Admin note (optional, sent to client)"/>
 
         <div className="grid gap-2.5">
           {/* Confirm — hide if already confirmed */}
           {booking.bookingStatus !== 'confirmed' && (
-            <button type="button" onClick={()=>onUpdate(booking.bookingId,'confirmed',note)} disabled={busy}
+            <button type="button" onClick={()=>onUpdate(booking.bookingId,'confirmed',note,'')} disabled={busy}
               className="w-full py-3 rounded-[14px] bg-[#5a9e70] text-white font-semibold text-sm disabled:opacity-50">
               {busy?'Saving…':'✓ Confirm'}
             </button>
           )}
+          {booking.bookingStatus !== 'rejected' && (
+            <div className="mb-3">
+              <p className="text-[10px] uppercase tracking-[0.15em] text-[#a84040] font-semibold mb-1">Rejection reason <span className="text-[#9a7080] font-normal">(required when rejecting)</span></p>
+              <textarea value={rejectionReason} onChange={e=>setRejectionReason(e.target.value)} className="input-field min-h-[60px] text-sm" placeholder="e.g. Date not available, slot fully booked..."/>
+            </div>
+          )}
           {/* Reject — hide if already rejected */}
           {booking.bookingStatus !== 'rejected' && (
-            <button type="button" onClick={()=>onUpdate(booking.bookingId,'rejected',note)} disabled={busy}
+            <button type="button" onClick={()=>onUpdate(booking.bookingId,'rejected',note,rejectionReason)} disabled={busy}
               className="w-full py-3 rounded-[14px] border border-[#e8b0b0] text-[#b05860] font-semibold text-sm disabled:opacity-50">
               ✕ Reject
             </button>
           )}
           {/* Back to pending — hide if already pending or draft */}
           {booking.bookingStatus !== 'pending' && booking.bookingStatus !== 'draft' && (
-            <button type="button" onClick={()=>onUpdate(booking.bookingId,'pending',note)} disabled={busy}
+            <button type="button" onClick={()=>onUpdate(booking.bookingId,'pending',note,'')} disabled={busy}
               className="w-full py-3 rounded-[14px] border border-[#e8cad0] text-[#7a5460] font-semibold text-sm disabled:opacity-50">
               ↩ Back to pending
             </button>
@@ -431,9 +437,14 @@ function CalendarTab({ bookings }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
   const dayBookings = useMemo(() =>
-    bookings.filter(b => b.preferredDate === format(activeDay, 'yyyy-MM-dd') && !b.isArchived),
+    bookings.filter(b => b.preferredDate === format(activeDay, 'yyyy-MM-dd') && !b.isArchived && b.bookingStatus === 'confirmed'),
     [bookings, activeDay]
   );
+  const confirmedByDay = useMemo(() => {
+    const m = {};
+    bookings.forEach(b => { if (b.bookingStatus === 'confirmed' && !b.isArchived) m[b.preferredDate] = true; });
+    return m;
+  }, [bookings]);
 
   return (
     <div>
@@ -444,7 +455,7 @@ function CalendarTab({ bookings }) {
         <div className="flex-1 flex gap-1.5 overflow-x-auto">
           {days.map(day => {
             const iso = format(day,'yyyy-MM-dd');
-            const hasBk = bookings.some(b=>b.preferredDate===iso&&!b.isArchived);
+            const hasBk = !!confirmedByDay[iso];
             const isActive = isSameDay(day, activeDay);
             return (
               <button key={iso} type="button" onClick={() => setActiveDay(day)}
@@ -672,6 +683,8 @@ function SettingsTab({ pin, adminProfile, onProfileSaved }) {
   const [savingPin, setSavingPin] = useState(false);
   const [adminName, setAdminName] = useState(adminProfile?.name || 'Admin');
   const [savingProfile, setSavingProfile] = useState(false);
+  // Keep adminName in sync when adminProfile prop updates (e.g. after data loads)
+  useEffect(() => { if (adminProfile?.name) setAdminName(adminProfile.name); }, [adminProfile?.name]);
   const { showToast } = useToast();
 
   async function changePin() {
@@ -744,6 +757,7 @@ export default function Admin() {
   const [selectedId, setSelectedId] = useState('');
   const [sheetOpen, setSheetOpen]   = useState(false);
   const [note, setNote]   = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
   const { showToast } = useToast();
   const refreshTimer = useRef(null);
 
@@ -801,18 +815,30 @@ export default function Admin() {
     attended:  bookings.filter(b=>b.serviceAttended&&!b.isArchived).length,
   }), [bookings]);
 
+  function isExpiredBooking(b) {
+    if (!b.preferredDate) return false;
+    if (['confirmed','rejected','archived'].includes(b.bookingStatus)) return false;
+    const today = new Date(); today.setHours(0,0,0,0);
+    return new Date(b.preferredDate + 'T00:00:00') < today;
+  }
+
   const TICKET_FILTERS = [
-    { key:'all', label:'All' },
-    { key:'pending', label:'Pending' },
+    { key:'all',       label:'All' },
+    { key:'pending',   label:'Pending' },
     { key:'confirmed', label:'Confirmed' },
-    { key:'archived', label:'Archived' },
-    { key:'draft', label:'Draft' },
+    { key:'rejected',  label:'Rejected' },
+    { key:'expired',   label:'Expired' },
+    { key:'draft',     label:'Draft' },
+    { key:'archived',  label:'Archived' },
   ];
 
   const filteredTickets = useMemo(() => {
     const q = query.trim().toLowerCase();
     return bookings.filter(b => {
-      const tabMatch = ticketFilter==='all' ? !b.isArchived : ticketFilter==='archived' ? b.isArchived : b.bookingStatus===ticketFilter&&!b.isArchived;
+      const tabMatch = ticketFilter==='all' ? !b.isArchived
+        : ticketFilter==='archived' ? b.isArchived
+        : ticketFilter==='expired' ? !b.isArchived && isExpiredBooking(b)
+        : b.bookingStatus===ticketFilter&&!b.isArchived;
       const qMatch = !q || [b.bookingId,b.clientName,b.email,b.phone].some(v=>String(v||'').toLowerCase().includes(q));
       return tabMatch && qMatch;
     });
@@ -825,10 +851,10 @@ export default function Admin() {
 
   function pick(b) { setSelectedId(b.bookingId); setNote(b.adminNote||''); setSheetOpen(true); }
 
-  function syncLocal(u) { setBookings(prev=>prev.map(b=>b.bookingId===u.bookingId?u:b)); setSelectedId(u.bookingId); setNote(u.adminNote||''); setSheetOpen(false); }
+  function syncLocal(u) { setBookings(prev=>prev.map(b=>b.bookingId===u.bookingId?u:b)); setSelectedId(u.bookingId); setNote(u.adminNote||''); setRejectionReason(''); setSheetOpen(false); }
 
-  async function updateStatus(bookingId, status, adminNote='') {
-    try { setLoadingId(bookingId); const {booking:u} = await bookingApi.adminUpdateStatus(pin,bookingId,status,adminNote); syncLocal(u); showToast(`Booking ${status}.`,'success'); }
+  async function updateStatus(bookingId, status, adminNote='', rejReason='') {
+    try { setLoadingId(bookingId); const {booking:u} = await bookingApi.adminUpdateStatus(pin,bookingId,status,adminNote,rejReason); syncLocal(u); showToast(`Booking ${status}.`,'success'); setRejectionReason(''); }
     catch(e) { showToast(e.message,'error'); } finally { setLoadingId(''); }
   }
   async function archiveBooking(bookingId) {
@@ -1052,6 +1078,7 @@ export default function Admin() {
                 </div>
                 <div className="hidden lg:block sticky top-6 h-fit">
                   <DetailPanel booking={selectedBooking} note={note} setNote={setNote}
+                    rejectionReason={rejectionReason} setRejectionReason={setRejectionReason}
                     onUpdate={updateStatus} onArchive={archiveBooking} onRestore={restoreBooking}
                     onMarkAttended={markAttended} onDelete={deleteBooking}
                     busy={loadingId===selectedBooking?.bookingId}/>
@@ -1084,6 +1111,7 @@ export default function Admin() {
           <button type="button" onClick={()=>setSheetOpen(false)} className="lg:hidden fixed inset-0 bg-black/25 backdrop-blur-[2px] z-40"/>
           <div className="lg:hidden fixed inset-x-0 bottom-0 z-50 max-h-[90vh] overflow-y-auto rounded-t-[28px]">
             <DetailPanel booking={selectedBooking} note={note} setNote={setNote}
+              rejectionReason={rejectionReason} setRejectionReason={setRejectionReason}
               onClose={()=>setSheetOpen(false)}
               onUpdate={updateStatus} onArchive={archiveBooking} onRestore={restoreBooking}
               onMarkAttended={markAttended} onDelete={deleteBooking}

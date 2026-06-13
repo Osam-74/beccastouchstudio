@@ -11,7 +11,7 @@ export const bookingApi = {
   getBooking:          (bookingId)                         => request({ action:'getBooking', bookingId }),
   searchBookings:      (query)                             => request({ action:'searchBookings', ...query }),
   adminOverview:       (pin)                               => request({ action:'adminOverview', pin }),
-  adminUpdateStatus:   (pin, bookingId, status, adminNote='') => request({ action:'adminUpdateStatus', pin, bookingId, status, adminNote }),
+  adminUpdateStatus:   (pin, bookingId, status, adminNote='', rejectionReason='') => request({ action:'adminUpdateStatus', pin, bookingId, status, adminNote, rejectionReason }),
   archiveBooking:      (pin, bookingId)                    => request({ action:'archiveBooking', pin, bookingId }),
   restoreBooking:      (pin, bookingId)                    => request({ action:'restoreBooking', pin, bookingId }),
   resetPin:            (currentPin, newPin)                => request({ action:'resetPin', currentPin, newPin }),
