@@ -16,6 +16,7 @@ export interface Env {
   FIREBASE_PRIVATE_KEY_B64: string;
   BECCA_MAIL_SECRET?: string;
   ADMIN_EMAIL?: string;
+  IMGBB_API_KEY?: string;
 }
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
@@ -821,6 +822,36 @@ export default {
       if (action === 'getPublicProducts') {
         const list = await fs.query('products', [], '-created_date');
         return j({ ok: true, products: list.filter(p => !p.is_archived) });
+      }
+
+      // ── uploadImage ────────────────────────────────────────────────────────
+      // Accepts { action:"uploadImage", imageBase64:"<base64 string>", mimeType:"image/jpeg" }
+      // Requires admin auth. Uploads to ImgBB and returns { url }.
+      if (action === 'uploadImage') {
+        await requireAdmin();
+        const imageBase64 = body.imageBase64 as string;
+        const mimeType = (body.mimeType as string) || 'image/jpeg';
+        if (!imageBase64) return j({ error: 'imageBase64 required' }, 400);
+
+        const apiKey = env.IMGBB_API_KEY;
+        if (!apiKey) return j({ error: 'IMGBB_API_KEY not configured on server' }, 500);
+
+        const form = new FormData();
+        form.append('key', apiKey);
+        form.append('image', imageBase64);
+
+        const imgbbRes = await fetch('https://api.imgbb.com/1/upload', {
+          method: 'POST',
+          body: form,
+        });
+        const imgbbData = await imgbbRes.json() as Record<string, unknown>;
+        if (!imgbbData.success) {
+          console.error('ImgBB error:', JSON.stringify(imgbbData));
+          return j({ error: 'Image upload failed', detail: imgbbData }, 502);
+        }
+        const data = imgbbData.data as Record<string, unknown>;
+        const url = (data.display_url || data.url) as string;
+        return j({ ok: true, url });
       }
 
       // ── adminGetProducts ────────────────────────────────────────────────────

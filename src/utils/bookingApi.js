@@ -58,4 +58,5 @@ export const bookingApi = {
   adminDeleteShopOrder:(pin, orderId, tok)      => adminRequest({ action:'adminDeleteShopOrder', pin, orderId }, tok),
   adminConfigSmtp:     (pin, config, tok)       => adminRequest({ action:'saveSmtpConfig', pin, config }, tok),
   resetPin:            (pin, newPin, tok)       => adminRequest({ action:'resetPin', pin, new_pin: newPin }, tok),
+  uploadImage:         (imageBase64, mimeType, tok) => adminRequest({ action:'uploadImage', imageBase64, mimeType }, tok),
 };
