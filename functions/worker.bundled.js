@@ -486,7 +486,7 @@ var worker_default = {
         if (!uploadRes.ok) {
           const err = await uploadRes.text();
           console.error("GCS upload failed:", uploadRes.status, err);
-          return j({ error: "Storage upload failed", detail: err }, 502);
+          return j({ error: "Storage upload failed", status: uploadRes.status, bucket, fileName, detail: err }, 502);
         }
         await fetch(
           `https://storage.googleapis.com/storage/v1/b/${bucket}/o/${encoded}?predefinedAcl=publicRead`,
