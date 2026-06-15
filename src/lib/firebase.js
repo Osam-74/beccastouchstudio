@@ -6,7 +6,7 @@ const firebaseConfig = {
   apiKey: 'AIzaSyClmvYRY8dyvabeRyCTRde4gk59rTcnBho',
   authDomain: 'beccastouch-studio.firebaseapp.com',
   projectId: 'beccastouch-studio',
-  storageBucket: 'beccastouch-studio.firebasestorage.app',
+  storageBucket: 'beccastouch-studio.appspot.com',
   messagingSenderId: '333178706405',
   appId: '1:333178706405:web:6a9e1af3f6792138c8f70c',
 };
