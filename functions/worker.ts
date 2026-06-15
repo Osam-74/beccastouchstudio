@@ -639,6 +639,43 @@ export default {
       const token = await getFirebaseToken(env);
       const projectId = env.FIREBASE_PROJECT_ID || 'beccastouch-studio';
       const fs = new Firestore(token, projectId);
+
+      // Handle multipart/form-data (used by uploadImage to avoid base64 JSON size limits)
+      const ct = request.headers.get('content-type') || '';
+      if (ct.includes('multipart/form-data')) {
+        const requireAdminMulti = () => checkAuth(env, request);
+        await requireAdminMulti();
+        const form = await request.formData();
+        const fileEntry = form.get('file') as File | null;
+        const folder    = (form.get('folder') as string) || 'products';
+        if (!fileEntry) return j({ error: 'file field required' }, 400);
+
+        const bytes    = new Uint8Array(await fileEntry.arrayBuffer());
+        const mimeType = fileEntry.type || 'image/jpeg';
+        const ext      = fileEntry.name?.split('.').pop() || 'jpg';
+        const fileName = `${folder}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+        const bucket   = `${projectId}.appspot.com`;
+        const encoded  = encodeURIComponent(fileName);
+
+        const uploadRes = await fetch(
+          `https://storage.googleapis.com/upload/storage/v1/b/${bucket}/o?uploadType=media&name=${encoded}`,
+          { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': mimeType }, body: bytes }
+        );
+        if (!uploadRes.ok) {
+          const err = await uploadRes.text();
+          console.error('GCS upload failed:', uploadRes.status, err);
+          return j({ error: 'Storage upload failed', detail: err }, 502);
+        }
+        // Make object public
+        await fetch(
+          `https://storage.googleapis.com/storage/v1/b/${bucket}/o/${encoded}?predefinedAcl=publicRead`,
+          { method: 'PATCH', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: '{}' }
+        ).catch(() => {});
+
+        const publicUrl = `https://storage.googleapis.com/${bucket}/${fileName}`;
+        return j({ ok: true, url: publicUrl });
+      }
+
       const body = await request.json().catch(() => ({})) as Record<string, unknown>;
       const action = body.action as string;
       if (!action) return j({ error: 'action required' }, 400);
@@ -821,59 +858,6 @@ export default {
       if (action === 'getPublicProducts') {
         const list = await fs.query('products', [], '-created_date');
         return j({ ok: true, products: list.filter(p => !p.is_archived) });
-      }
-
-      // ── uploadImage ────────────────────────────────────────────────────────
-      // Server-side upload to Firebase Storage via REST — avoids all CORS issues.
-      // Body: { action, imageBase64: "<pure base64>", mimeType: "image/jpeg", fileName: "products/xxx.jpg" }
-      if (action === 'uploadImage') {
-        await requireAdmin();
-        const imageBase64 = body.imageBase64 as string;
-        const mimeType    = (body.mimeType as string)  || 'image/jpeg';
-        const fileName    = (body.fileName as string)  || `products/${Date.now()}.jpg`;
-        if (!imageBase64) return j({ error: 'imageBase64 required' }, 400);
-
-        // Decode base64 → binary
-        const binStr  = atob(imageBase64);
-        const bytes   = new Uint8Array(binStr.length);
-        for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
-
-        // Upload to Firebase Storage via XML API (supports service account OAuth)
-        const bucket  = `${projectId}.appspot.com`;
-        const encoded = encodeURIComponent(fileName);
-        const uploadUrl = `https://storage.googleapis.com/upload/storage/v1/b/${bucket}/o?uploadType=media&name=${encoded}`;
-
-        const uploadRes = await fetch(uploadUrl, {
-          method : 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type' : mimeType,
-          },
-          body: bytes,
-        });
-
-        if (!uploadRes.ok) {
-          const err = await uploadRes.text();
-          console.error('Storage upload failed:', uploadRes.status, err);
-          return j({ error: 'Storage upload failed', detail: err }, 502);
-        }
-
-        // Make the object publicly readable
-        const patchUrl = `https://storage.googleapis.com/storage/v1/b/${bucket}/o/${encoded}`;
-        await fetch(`${patchUrl}/iam`, {
-          method : 'GET',
-          headers: { 'Authorization': `Bearer ${token}` },
-        }).catch(() => {});
-
-        // Set public read IAM — insert allUsers reader via JSON API
-        await fetch(`${patchUrl}?predefinedAcl=publicRead`, {
-          method : 'PATCH',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body   : JSON.stringify({}),
-        }).catch(() => {});
-
-        const publicUrl = `https://storage.googleapis.com/${bucket}/${fileName}`;
-        return j({ ok: true, url: publicUrl });
       }
 
       // ── adminGetProducts ────────────────────────────────────────────────────
