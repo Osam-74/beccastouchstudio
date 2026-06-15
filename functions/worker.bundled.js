@@ -1,4 +1,4 @@
-// worker.ts
+// functions/worker.ts
 var CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "content-type, authorization",
@@ -465,6 +465,37 @@ var worker_default = {
       const token = await getFirebaseToken(env);
       const projectId = env.FIREBASE_PROJECT_ID || "beccastouch-studio";
       const fs = new Firestore(token, projectId);
+      const ct = request.headers.get("content-type") || "";
+      if (ct.includes("multipart/form-data")) {
+        const requireAdminMulti = () => checkAuth(env, request);
+        await requireAdminMulti();
+        const form = await request.formData();
+        const fileEntry = form.get("file");
+        const folder = form.get("folder") || "products";
+        if (!fileEntry) return j({ error: "file field required" }, 400);
+        const bytes = new Uint8Array(await fileEntry.arrayBuffer());
+        const mimeType = fileEntry.type || "image/jpeg";
+        const ext = fileEntry.name?.split(".").pop() || "jpg";
+        const fileName = `${folder}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+        const bucket = `${projectId}.appspot.com`;
+        const encoded = encodeURIComponent(fileName);
+        const uploadRes = await fetch(
+          `https://storage.googleapis.com/upload/storage/v1/b/${bucket}/o?uploadType=media&name=${encoded}`,
+          { method: "POST", headers: { "Authorization": `Bearer ${token}`, "Content-Type": mimeType }, body: bytes }
+        );
+        if (!uploadRes.ok) {
+          const err = await uploadRes.text();
+          console.error("GCS upload failed:", uploadRes.status, err);
+          return j({ error: "Storage upload failed", detail: err }, 502);
+        }
+        await fetch(
+          `https://storage.googleapis.com/storage/v1/b/${bucket}/o/${encoded}?predefinedAcl=publicRead`,
+          { method: "PATCH", headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" }, body: "{}" }
+        ).catch(() => {
+        });
+        const publicUrl = `https://storage.googleapis.com/${bucket}/${fileName}`;
+        return j({ ok: true, url: publicUrl });
+      }
       const body = await request.json().catch(() => ({}));
       const action = body.action;
       if (!action) return j({ error: "action required" }, 400);
