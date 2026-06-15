@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Plus, Pencil, Trash2, X, Package, Tag, ToggleLeft, ToggleRight, ChevronLeft, ChevronRight, ImagePlus, Link } from 'lucide-react';
 import { bookingApi } from '../utils/bookingApi';
-import { uploadToStorage } from '../lib/firebase';
+import { uploadImage } from '../lib/uploadImage';
 import { useToast } from '../hooks/useToast';
 import { SITE } from '../utils/siteConfig';
 
@@ -57,7 +57,7 @@ export default function AdminShopTab({ pin, idToken, getFreshToken }) {
     for (const file of toProcess) {
       if (file.size > 20 * 1024 * 1024) { showToast(`${file.name} is too large (max 20 MB).`, 'error'); continue; }
       try {
-        const url = await uploadToStorage(file, 'products');
+        const url = await uploadImage(file, tok);
         results.push(url);
       } catch(e) { showToast(`Failed to upload ${file.name}: ${e.message}`, 'error'); }
     }
