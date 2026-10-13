@@ -1,8 +1,14 @@
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Camera, Sparkles, Search } from 'lucide-react';
+import { ArrowRight, Camera, Sparkles, Search, X } from 'lucide-react';
 import PwaInstallCard from '../components/PwaInstallCard';
 import { SITE } from '../utils/siteConfig';
 import heroImg from '../assets/hero.png';
+import studioEntrance from '../assets/gallery/studio-entrance.jpg';
+import studioLedCorner from '../assets/gallery/studio-led-corner.jpg';
+import studioArches from '../assets/gallery/studio-arches.jpg';
+import studioBurgundySet from '../assets/gallery/studio-burgundy-set.jpg';
+import studioWoodDivider from '../assets/gallery/studio-wood-divider.jpg';
 
 const INSTAGRAM = 'https://www.instagram.com/beccastouch?igsh=NG0zNmkxeWFzdjV6';
 
@@ -19,12 +25,29 @@ const cards = [
 ];
 
 const gallery = [
-  { title: 'Behind the scenes', tone: 'from-[#f0d4da] via-[#f7e8e4] to-[#f4d0d6]' },
-  { title: 'Soft light', tone: 'from-[#f7e4e8] via-[#f4dce0] to-[#efd8d0]' },
-  { title: 'Studio vibe', tone: 'from-[#f2d8de] via-[#f8ecec] to-[#f0dcd6]' },
+  { title: 'Studio entrance', src: studioEntrance, alt: 'Beccastouch Studio entrance with white wall discs, arched alcoves and marble floor' },
+  { title: 'LED backdrop corner', src: studioLedCorner, alt: 'Studio corner with warm gold LED strips behind wood panelling and a slatted divider' },
+  { title: 'Arch alcoves', src: studioArches, alt: 'White arched alcoves with warm lighting, wall discs and a full-length mirror' },
+  { title: 'Burgundy photo set', src: studioBurgundySet, alt: 'Deep burgundy photo backdrop set with a pendant light on a marble floor' },
+  { title: 'Wood divider', src: studioWoodDivider, alt: 'Wooden slatted divider shelf with dried flowers against peach walls' },
 ];
 
 export default function Home() {
+  const [lightbox, setLightbox] = useState(null);
+
+  // Close the enlarged photo with Escape, and stop the page scrolling behind it.
+  useEffect(() => {
+    if (!lightbox) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setLightbox(null); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [lightbox]);
+
   return (
     <div className="overflow-hidden">
 
@@ -158,25 +181,61 @@ export default function Home() {
           <div className="flex items-end justify-between gap-6 mb-8 flex-wrap">
             <div>
               <p className="section-label text-[#b8607a] mb-3">Gallery</p>
-              <h2 className="font-display text-[26px] md:text-[38px] text-[#3d1f6e]">Real clients, real moments</h2>
+              <h2 className="font-display text-[26px] md:text-[38px] text-[#3d1f6e]">Step inside the studio</h2>
             </div>
-            <p className="text-[#7a5460] text-sm max-w-xs">No stock photography here. Just women who showed up and shined.</p>
+            <p className="text-[#7a5460] text-sm max-w-xs">No stock photography here. This is our actual space, ready for your shoot.</p>
           </div>
-          <div className="grid md:grid-cols-3 gap-5 mb-7">
-            {gallery.map((item) => (
-              <div key={item.title} className="rounded-[28px] overflow-hidden border border-[#eecdd4] shadow-sm">
-                <div className={`aspect-[4/5] bg-gradient-to-br ${item.tone} relative`}>
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_40%_30%,rgba(255,255,255,0.55),transparent_42%)]" />
-                  <div className="absolute bottom-5 left-5 right-5 rounded-2xl bg-white/75 backdrop-blur-sm px-4 py-3">
-                    <p className="font-semibold text-[#2a1820] text-sm">{item.title}</p>
-                  </div>
+          {/* 5 photos: 2-col on phones (first one spans full width), featured-left + 2x2 on desktop. */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 lg:grid-rows-2 gap-3 md:gap-5 mb-7">
+            {gallery.map((item, i) => (
+              <button
+                key={item.title}
+                type="button"
+                onClick={() => setLightbox(item)}
+                aria-label={`View larger: ${item.title}`}
+                className={`group relative overflow-hidden rounded-[22px] md:rounded-[28px] border border-[#eecdd4] shadow-sm bg-[#f7e8e4] text-left cursor-zoom-in focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b8607a] ${
+                  i === 0 ? 'col-span-2 aspect-[4/3] lg:col-span-2 lg:row-span-2 lg:aspect-auto' : 'aspect-[4/5]'
+                }`}
+              >
+                <img
+                  src={item.src}
+                  alt={item.alt}
+                  loading={i === 0 ? 'eager' : 'lazy'}
+                  decoding="async"
+                  className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                />
+                <div className="absolute bottom-3 left-3 right-3 md:bottom-5 md:left-5 md:right-5 rounded-2xl bg-white/80 backdrop-blur-sm px-4 py-2.5 md:py-3">
+                  <p className="font-semibold text-[#2a1820] text-sm">{item.title}</p>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
           <a href={INSTAGRAM} target="_blank" rel="noreferrer" className="btn-outline-dark">See our work <ArrowRight size={13} /></a>
         </div>
       </section>
+
+      {lightbox && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={lightbox.title}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            aria-label="Close photo"
+            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+          >
+            <X size={20} />
+          </button>
+          <figure className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()}>
+            <img src={lightbox.src} alt={lightbox.alt} className="max-h-[85vh] max-w-full rounded-2xl object-contain" />
+            <figcaption className="mt-3 text-center text-sm text-white/90">{lightbox.title}</figcaption>
+          </figure>
+        </div>
+      )}
 
       {/* ── MAKEUP ARTISTRY SERVICES ── */}
       <section className="py-20 bg-blush">
